@@ -3,6 +3,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <variant>
 
 
@@ -22,7 +23,18 @@ void show_help(char* argv[], const Opts& option_descriptions)
     std::cerr << "Usage: " << argv[0] << " [options]\n";
     T default_arguments;
     for (const auto& opt : option_descriptions)
-        std::cerr << "  -" << opt.short_name << ", --" << opt.long_name << " " << opt.help << "\n";
+        std::cerr
+            << "  -" << opt.short_name << ", --" << opt.long_name << " " << opt.help
+            << std::visit([&](auto field) -> std::string {
+                if constexpr (std::is_member_pointer_v<decltype(field)>)
+                    if constexpr (std::is_same_v<std::decay_t<decltype(default_arguments.*field)>, std::string>)
+                        return " (default " + default_arguments.*field + ")";
+                    else
+                        return " (default " + std::to_string(default_arguments.*field) + ")";
+                return "";
+            }, opt.field)
+            << "\n"
+        ;
 }
 
 template <typename T, typename Opts>
