@@ -15,6 +15,9 @@
 
 #include "lodepng.h"
 
+#include "srgb.hpp"
+
+
 using std::int32_t;
 using std::int64_t;
 
@@ -223,7 +226,7 @@ int main(int argc, char* argv[])
     std::vector<uint8_t> image(args.width * args.height * 4);
     for (uint64_t i = 0; i < histogram.size(); i++)
     {
-        uint8_t value = histogram[i] * 255 / max;
+        uint8_t value = srgb_encoding_gamma((float)histogram[i] / max) * 255;
         // Write RGBA
         image[i * 4] = value;
         image[i * 4 + 1] = value;

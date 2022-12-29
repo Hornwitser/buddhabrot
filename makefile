@@ -1,5 +1,5 @@
 CXXFLAGS = -Wall -Wextra -Wpedantic -std=c++20 -march=native -Ilib/lodepng
-HEADERS = lib/lodepng/lodepng.h
+HEADERS = lib/lodepng/lodepng.h src/srgb.hpp
 UNITS = lib/lodepng/lodepng.cpp src/buddhabrot.cpp
 SOURCES = ${HEADERS} ${UNITS}
 
