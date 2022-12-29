@@ -36,7 +36,7 @@ const std::array<OptionDescription<Arguments>, 6> option_descriptions = {
     "s", "samples",        "number of samples to compute", &Arguments::samples,
     "i", "max-iterations", "maximum number of iterations befor discarding path", &Arguments::max_iterations,
     "o", "output-path",    "path to output rendered PNG image", &Arguments::output_path,
-    "?", "help",           "show this help", std::monostate(),
+    "?", "help",           "show this help", std::nullopt,
 };
 
 void plot_path(const Arguments& args, std::vector<int>& histogram, const std::vector<std::complex<float>>& path)

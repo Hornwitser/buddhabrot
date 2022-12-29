@@ -1,6 +1,7 @@
 #include <charconv>
 #include <concepts>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -14,7 +15,7 @@ struct OptionDescription {
     std::string_view short_name;
     std::string_view long_name;
     std::string_view help;
-    std::variant<std::monostate, int32_t T::*, int64_t T::*, std::string T::*> field;
+    std::optional<std::variant<int32_t T::*, int64_t T::*, std::string T::*>> field;
 };
 
 template <typename T, typename Opts>
@@ -23,18 +24,14 @@ void show_help(char* argv[], const Opts& option_descriptions)
     std::cerr << "Usage: " << argv[0] << " [options]\n";
     T default_arguments;
     for (const auto& opt : option_descriptions)
-        std::cerr
-            << "  -" << opt.short_name << ", --" << opt.long_name << " " << opt.help
-            << std::visit([&](auto field) -> std::string {
-                if constexpr (std::is_member_pointer_v<decltype(field)>)
-                    if constexpr (std::is_same_v<std::decay_t<decltype(default_arguments.*field)>, std::string>)
-                        return " (default " + default_arguments.*field + ")";
-                    else
-                        return " (default " + std::to_string(default_arguments.*field) + ")";
-                return "";
-            }, opt.field)
-            << "\n"
-        ;
+    {
+        std::cerr << "  -" << opt.short_name << ", --" << opt.long_name << " " << opt.help;
+        if (opt.field)
+            std::visit([&](auto field) {
+                std::cerr << " (default " << default_arguments.*field << ")";
+            }, *opt.field);
+        std::cerr << "\n";
+    }
 }
 
 template <typename T, typename Opts>
@@ -56,10 +53,6 @@ const OptionDescription<T>& find_long_opt(std::string_view option, const Opts& o
     std::cerr << "Invalid long option " << option << std::endl;
     throw ParsingFailed{};
 }
-
-template <typename T>
-void parse_value(std::monostate, T&, std::string_view)
-{ }
 
 template <std::integral Int, typename T>
 void parse_value(Int T::* field, T& args, std::string_view value)
@@ -112,20 +105,18 @@ int parse_opts(int argc, char* argv[], T& args, int argument_pos, const Opts& op
         throw ParsingFailed{};
     }
 
-    std::string_view value;
-    if (!std::holds_alternative<std::monostate>(description->field))
+    if (!description->field)
+        return 0;
+
+    if (argument_pos >= argc)
     {
-        if (argument_pos >= argc)
-        {
-            std::cerr << "Expected argument containing value for " << description->long_name << std::endl;
-            throw ParsingFailed{};
-        }
-        else
-            value = argv[argument_pos];
+        std::cerr << "Expected argument containing value for " << description->long_name << std::endl;
+        throw ParsingFailed{};
     }
 
-    std::visit([&](auto& field) { parse_value(field, args, value); }, description->field);
+    std::visit([&](auto& field) { parse_value(field, args, argv[argument_pos]); }, *description->field);
     return 1;
+
 }
 
 template <typename T, typename Opts>
