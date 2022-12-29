@@ -89,12 +89,31 @@ void escape_boundnary(const Arguments& args, std::vector<int>& histogram)
     }
 }
 
+/**
+Calculates an upper bound on the squared distance from the origin point that
+still includes all paths going through the bounding box.
+*/
+float maximum_norm_distance(BoundingBox box)
+{
+    // The structures around -2 + 0i can still reach anywhere in the fractal,
+    // but outside a distance of 2 all paths rapidly increase away from the
+    // origin. Thus a simple upper bound can be calculated by taking the larger
+    // of the squared distance to the furthest point in the bounding and the
+    // squared distance of 2.
+
+    float x = std::max(std::abs(box.min_x), std::abs(box.max_x));
+    float y = std::max(std::abs(box.min_y), std::abs(box.max_y));
+    return std::max(2.f * 2.f, x * x + y * y);
+}
+
 void buddhabrot(const Arguments& args, std::vector<int>& histogram)
 {
     std::ranlux48_base engine;
     std::uniform_real_distribution<float> x_dist(args.sample_area.min_x, args.sample_area.max_x);
     std::uniform_real_distribution<float> y_dist(args.sample_area.min_y, args.sample_area.max_y);
     std::vector<std::complex<float>> path;
+
+    float norm_limit = maximum_norm_distance(args.output_area);
     for (int64_t i = 0; i < args.samples; i++)
     {
         path.clear();
@@ -104,7 +123,7 @@ void buddhabrot(const Arguments& args, std::vector<int>& histogram)
         {
             path.push_back(z);
             z = z * z + c;
-            if (std::norm(z) > 4)
+            if (std::norm(z) > norm_limit)
             {
                 plot_path(args, histogram, path);
                 break;
