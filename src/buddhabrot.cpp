@@ -58,6 +58,30 @@ void plot_path(const Arguments& args, std::vector<int>& histogram, const std::ve
     }
 }
 
+void buddhabrot(const Arguments& args, std::vector<int>& histogram)
+{
+    std::ranlux48_base engine;
+    std::uniform_real_distribution<float> x_dist(args.sample_area.min_x, args.sample_area.max_x);
+    std::uniform_real_distribution<float> y_dist(args.sample_area.min_y, args.sample_area.max_y);
+    std::vector<std::complex<float>> path;
+    for (int64_t i = 0; i < args.samples; i++)
+    {
+        path.clear();
+        const std::complex<float> c(x_dist(engine), y_dist(engine));
+        std::complex z = c;
+        for (int64_t j = 0; j < args.max_iterations; j++)
+        {
+            path.push_back(z);
+            z = z * z + c;
+            if (std::norm(z) > 4)
+            {
+                plot_path(args, histogram, path);
+                break;
+            }
+        }
+    }
+}
+
 int main(int argc, char* argv[])
 {
     Arguments args;
@@ -78,28 +102,8 @@ int main(int argc, char* argv[])
     std::cout << "output_area: " << args.output_area << "\n";
     std::cout << "output_path: " << args.output_path << "\n";
 
-    std::ranlux48_base engine;
-    std::uniform_real_distribution<float> x_dist(args.sample_area.min_x, args.sample_area.max_x);
-    std::uniform_real_distribution<float> y_dist(args.sample_area.min_y, args.sample_area.max_y);
     std::vector<int> histogram(args.width * args.height);
-    std::vector<std::complex<float>> path;
-    for (int64_t i = 0; i < args.samples; i++)
-    {
-        path.clear();
-        const std::complex<float> c(x_dist(engine), y_dist(engine));
-        std::complex z = c;
-        for (int64_t j = 0; j < args.max_iterations; j++)
-        {
-            path.push_back(z);
-            z = z * z + c;
-            if (std::norm(z) > 4)
-            {
-                plot_path(args, histogram, path);
-                break;
-            }
-        }
-    }
-
+    buddhabrot(args, histogram);
 
     int64_t total = std::reduce(histogram.begin(), histogram.end());
     std::cout << "total samples: " << total << std::endl;
