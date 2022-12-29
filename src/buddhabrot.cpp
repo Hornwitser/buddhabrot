@@ -28,16 +28,18 @@ struct Arguments {
     int64_t max_iterations = 1'000;
     BoundingBox sample_area = { -2.f, -2.f, 2.f, 2.f };
 
+    bool escape_boundnary = false;
     BoundingBox output_area = { -2.f, -2.f, 2.f, 2.f };
     std::string output_path = "render.png";
 };
 
-const std::array<OptionDescription<Arguments>, 8> option_descriptions = {
+const std::array<OptionDescription<Arguments>, 9> option_descriptions = {
     "w", "width",          "width of the output image", &Arguments::width,
     "h", "height",         "height of the output image", &Arguments::height,
     "s", "samples",        "number of samples to compute", &Arguments::samples,
     "a", "sample-area",    "area to make random samples in", &Arguments::sample_area,
     "i", "max-iterations", "maximum number of iterations befor discarding path", &Arguments::max_iterations,
+    "E", "escape",         "compute escape boundnary where magnitute only increases", &Arguments::escape_boundnary,
     "A", "output-area",    "area to show in output image", &Arguments::output_area,
     "o", "output-path",    "path to output rendered PNG image", &Arguments::output_path,
     "?", "help",           "show this help", std::nullopt,
@@ -55,6 +57,35 @@ void plot_path(const Arguments& args, std::vector<int>& histogram, const std::ve
         if (y < 0.f || 1.f <= y)
             continue;
         histogram[(int)(x * args.width) + (int)(y * args.width) * args.width] += 1;
+    }
+}
+
+void escape_boundnary(const Arguments& args, std::vector<int>& histogram)
+{
+    for (decltype(histogram.size()) i = 0; i < histogram.size(); i++)
+    {
+        const BoundingBox& area = args.output_area;
+        float x = ((float)(i % args.width) + 0.5f) / args.width * (area.max_x - area.min_x) + area.min_x;
+        float y = ((float)(i / args.width) + 0.5f) / args.height * (area.max_y - area.min_y) + area.min_y;
+
+        std::complex c(x, y);
+        std::complex z = c;
+        float norm_c = std::norm(c);
+        for (int64_t j = 0; j < args.max_iterations; j++)
+        {
+            z = z * z + c;
+            float norm_z = std::norm(z);
+            if (!std::isfinite(norm_z))
+                break;
+            if (norm_z < norm_c)
+            {
+                histogram[i] = args.max_iterations - j;
+                break;
+            }
+        }
+
+        if (!std::isfinite(std::norm(z)) || std::norm(z) >= norm_c)
+            histogram[i] = 0;
     }
 }
 
@@ -84,6 +115,9 @@ void buddhabrot(const Arguments& args, std::vector<int>& histogram)
 
 int main(int argc, char* argv[])
 {
+    std::cout.setf(std::ios::boolalpha);
+    std::cerr.setf(std::ios::boolalpha);
+
     Arguments args;
     try
     {
@@ -99,11 +133,15 @@ int main(int argc, char* argv[])
     std::cout << "samples: " << args.samples << "\n";
     std::cout << "sample_area: " << args.sample_area << "\n";
     std::cout << "max_iterations: " << args.max_iterations << "\n";
+    std::cout << "escape_boundnary: " << args.escape_boundnary << "\n";
     std::cout << "output_area: " << args.output_area << "\n";
     std::cout << "output_path: " << args.output_path << "\n";
 
     std::vector<int> histogram(args.width * args.height);
-    buddhabrot(args, histogram);
+    if (args.escape_boundnary)
+        escape_boundnary(args, histogram);
+    else
+        buddhabrot(args, histogram);
 
     int64_t total = std::reduce(histogram.begin(), histogram.end());
     std::cout << "total samples: " << total << std::endl;

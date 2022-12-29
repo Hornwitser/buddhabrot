@@ -25,7 +25,7 @@ struct OptionDescription {
     std::string_view short_name;
     std::string_view long_name;
     std::string_view help;
-    std::optional<std::variant<int32_t T::*, int64_t T::*, std::string T::*, BoundingBox T::*>> field;
+    std::optional<std::variant<bool T::*, int32_t T::*, int64_t T::*, std::string T::*, BoundingBox T::*>> field;
 };
 
 template <typename T, typename Opts>
@@ -78,6 +78,13 @@ void parse_number(std::string_view value, T& field)
         std::cerr << "Failed to parse number, input " << value << " is not valid" << std::endl;
         throw ParsingFailed{};
     }
+}
+
+template <typename T>
+int parse_value(int, char* [], T& args, int, bool T::* field)
+{
+    args.*field = true;
+    return 0;
 }
 
 template <std::integral Int, typename T>
