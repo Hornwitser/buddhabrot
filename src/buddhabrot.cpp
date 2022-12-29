@@ -26,14 +26,16 @@ struct Arguments {
     PixelSize height = 800;
     int64_t samples = 1'000'000;
     int64_t max_iterations = 1'000;
+    BoundingBox sample_area = { -2.f, -2.f, 2.f, 2.f };
 
     std::string output_path = "render.png";
 };
 
-const std::array<OptionDescription<Arguments>, 6> option_descriptions = {
+const std::array<OptionDescription<Arguments>, 7> option_descriptions = {
     "w", "width",          "width of the output image", &Arguments::width,
     "h", "height",         "height of the output image", &Arguments::height,
     "s", "samples",        "number of samples to compute", &Arguments::samples,
+    "a", "sample-area",    "area to make random samples in", &Arguments::sample_area,
     "i", "max-iterations", "maximum number of iterations befor discarding path", &Arguments::max_iterations,
     "o", "output-path",    "path to output rendered PNG image", &Arguments::output_path,
     "?", "help",           "show this help", std::nullopt,
@@ -69,17 +71,19 @@ int main(int argc, char* argv[])
     std::cout << "width: " << args.width << "\n";
     std::cout << "height: " << args.height << "\n";
     std::cout << "samples: " << args.samples << "\n";
+    std::cout << "sample_area: " << args.sample_area << "\n";
     std::cout << "max_iterations: " << args.max_iterations << "\n";
     std::cout << "output_path: " << args.output_path << "\n";
 
     std::ranlux48_base engine;
-    std::uniform_real_distribution<float> dist(-2, 2);
+    std::uniform_real_distribution<float> x_dist(args.sample_area.min_x, args.sample_area.max_x);
+    std::uniform_real_distribution<float> y_dist(args.sample_area.min_y, args.sample_area.max_y);
     std::vector<int> histogram(args.width * args.height);
     std::vector<std::complex<float>> path;
     for (int64_t i = 0; i < args.samples; i++)
     {
         path.clear();
-        const std::complex<float> c(dist(engine), dist(engine));
+        const std::complex<float> c(x_dist(engine), y_dist(engine));
         std::complex z = c;
         for (int64_t j = 0; j < args.max_iterations; j++)
         {
