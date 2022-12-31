@@ -51,6 +51,7 @@ const std::array<OptionDescription<Arguments>, 9> option_descriptions = {
 
 struct Performance {
     int64_t samples_input = 0;
+    int64_t samples_iterate = 0;
     int64_t samples_output = 0;
     int64_t points_input = 0;
     int64_t points_output = 0;
@@ -139,6 +140,17 @@ BoundingBox maximum_sample_area(const Arguments& args)
     return {-d, -d, d, d};
 }
 
+bool inside_cardioid(std::complex<float> c)
+{
+    float p = std::sqrt(std::pow(c.real() - 1.f / 4.f, 2.f) + c.imag() * c.imag());
+    return c.real() <= p - 2.f * p * p + 1.f / 4.f;
+}
+
+bool inside_period2_bulb(std::complex<float> c)
+{
+    return std::pow(c.real() + 1.f, 2.f) + std::pow(c.imag(), 2) <= 1.f / 16.f;
+}
+
 void buddhabrot(const Arguments& args, std::vector<int>& histogram, Performance& perf)
 {
     std::ranlux48_base engine;
@@ -151,6 +163,11 @@ void buddhabrot(const Arguments& args, std::vector<int>& histogram, Performance&
     {
         path.clear();
         const std::complex<float> c(x_dist(engine), y_dist(engine));
+
+        if (inside_cardioid(c) || inside_period2_bulb(c))
+            continue;
+        perf.samples_iterate++;
+
         std::complex z = c;
         for (int64_t j = 0; j < args.max_iterations; j++)
         {
@@ -206,7 +223,8 @@ int main(int argc, char* argv[])
 
     std::cout << "samples_input: " << perf.samples_input << "\n";
     std::cout << "points_output: " << perf.points_output << "\n";
-    std::cout << "samples_output/input ratio: " << (float)perf.samples_output / perf.samples_input << "\n";
+    std::cout << "samples_iterate/input ratio: " << (float)perf.samples_iterate / perf.samples_input << "\n";
+    std::cout << "samples_output/iterate ratio: " << (float)perf.samples_output / perf.samples_iterate << "\n";
     std::cout << "points_output/input ratio: " << (float)perf.points_output / perf.points_input << "\n";
     std::cout << "compute_time: " << Seconds(perf.compute_time) << "\n";
     std::cout << "input megasamples/s: " << perf.samples_input / Microseconds(perf.compute_time).count() << "\n";
