@@ -56,7 +56,7 @@ void plot_path(const Arguments& args, std::vector<int>& histogram, const std::ve
         float y = (point.imag() - area.min_y) / (area.max_y - area.min_y);
         if (y < 0.f || 1.f <= y)
             continue;
-        histogram[(int)(x * args.width) + (int)(y * args.width) * args.width] += 1;
+        histogram[(int)(x * args.width) + (int)(y * args.height) * args.width] += 1;
     }
 }
 

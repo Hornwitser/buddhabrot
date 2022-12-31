@@ -14,7 +14,7 @@ bin:
 	mkdir bin
 
 bin/buddhabrot: ${SOURCES} | bin
-	g++ ${CXXFLAGS} -O3 ${UNITS} -o bin/buddhabrot
+	g++ ${CXXFLAGS} -g -O3 ${UNITS} -o bin/buddhabrot
 
 bin/buddhabrot-debug: ${SOURCES} | bin
 	g++ ${CXXFLAGS} -g -O0 ${UNITS} -o bin/buddhabrot-debug
