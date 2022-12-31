@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <complex>
 #include <iostream>
 #include <random>
@@ -20,6 +21,9 @@ using std::int32_t;
 using std::int64_t;
 
 using PixelSize = int32_t;
+using Clock = std::chrono::steady_clock;
+using Microseconds = std::chrono::duration<double, std::micro>;
+using Seconds = std::chrono::duration<double>;
 
 struct Arguments {
     PixelSize width = 800;
@@ -45,8 +49,21 @@ const std::array<OptionDescription<Arguments>, 9> option_descriptions = {
     "?", "help",           "show this help", std::nullopt,
 };
 
-void plot_path(const Arguments& args, std::vector<int>& histogram, const std::vector<std::complex<float>>& path)
-{
+struct Performance {
+    int64_t samples_input = 0;
+    int64_t samples_output = 0;
+    int64_t points_input = 0;
+    int64_t points_output = 0;
+    Clock::duration compute_time = Clock::duration(0);
+};
+
+void plot_path(
+    const Arguments& args,
+    const std::vector<std::complex<float>>& path,
+    std::vector<int>& histogram,
+    Performance& perf
+) {
+    int64_t points_output = 0;
     for (const auto& point : path)
     {
         const BoundingBox& area = args.output_area;
@@ -57,10 +74,14 @@ void plot_path(const Arguments& args, std::vector<int>& histogram, const std::ve
         if (y < 0.f || 1.f <= y)
             continue;
         histogram[(int)(x * args.width) + (int)(y * args.height) * args.width] += 1;
+        points_output++;
     }
+
+    perf.points_input += path.size();
+    perf.points_output += points_output;
 }
 
-void escape_boundnary(const Arguments& args, std::vector<int>& histogram)
+void escape_boundnary(const Arguments& args, std::vector<int>& histogram, Performance& perf)
 {
     for (decltype(histogram.size()) i = 0; i < histogram.size(); i++)
     {
@@ -87,6 +108,8 @@ void escape_boundnary(const Arguments& args, std::vector<int>& histogram)
         if (!std::isfinite(std::norm(z)) || std::norm(z) >= norm_c)
             histogram[i] = 0;
     }
+
+    perf.samples_input += histogram.size();
 }
 
 /**
@@ -116,7 +139,7 @@ BoundingBox maximum_sample_area(const Arguments& args)
     return {-d, -d, d, d};
 }
 
-void buddhabrot(const Arguments& args, std::vector<int>& histogram)
+void buddhabrot(const Arguments& args, std::vector<int>& histogram, Performance& perf)
 {
     std::ranlux48_base engine;
     std::uniform_real_distribution<float> x_dist(args.sample_area->min_x, args.sample_area->max_x);
@@ -135,11 +158,14 @@ void buddhabrot(const Arguments& args, std::vector<int>& histogram)
             z = z * z + c;
             if (std::norm(z) > norm_limit)
             {
-                plot_path(args, histogram, path);
+                plot_path(args, path, histogram, perf);
+                perf.samples_output++;
                 break;
             }
         }
     }
+
+    perf.samples_input += args.samples;
 }
 
 int main(int argc, char* argv[])
@@ -170,13 +196,22 @@ int main(int argc, char* argv[])
     std::cout << "output_path: " << args.output_path << "\n";
 
     std::vector<int> histogram(args.width * args.height);
+    Performance perf;
+    Clock::time_point start = Clock::now();
     if (args.escape_boundnary)
-        escape_boundnary(args, histogram);
+        escape_boundnary(args, histogram, perf);
     else
-        buddhabrot(args, histogram);
+        buddhabrot(args, histogram, perf);
+    perf.compute_time = Clock::now() - start;
 
-    int64_t total = std::reduce(histogram.begin(), histogram.end());
-    std::cout << "total samples: " << total << std::endl;
+    std::cout << "samples_input: " << perf.samples_input << "\n";
+    std::cout << "points_output: " << perf.points_output << "\n";
+    std::cout << "samples_output/input ratio: " << (float)perf.samples_output / perf.samples_input << "\n";
+    std::cout << "points_output/input ratio: " << (float)perf.points_output / perf.points_input << "\n";
+    std::cout << "compute_time: " << Seconds(perf.compute_time) << "\n";
+    std::cout << "input megasamples/s: " << perf.samples_input / Microseconds(perf.compute_time).count() << "\n";
+    std::cout << "output megapoints/s: " << perf.points_output / Microseconds(perf.compute_time).count() << "\n";
+
     int64_t max = *std::max_element(histogram.begin(), histogram.end());
     std::cout << "lagest bucket size: " << max << std::endl;
 
