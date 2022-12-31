@@ -26,7 +26,7 @@ struct Arguments {
     PixelSize height = 800;
     int64_t samples = 1'000'000;
     int64_t max_iterations = 1'000;
-    BoundingBox sample_area = { -2.f, -2.f, 2.f, 2.f };
+    std::optional<BoundingBox> sample_area = std::nullopt;
 
     bool escape_boundnary = false;
     BoundingBox output_area = { -2.f, -2.f, 2.f, 2.f };
@@ -106,11 +106,21 @@ float maximum_norm_distance(BoundingBox box)
     return std::max(2.f * 2.f, x * x + y * y);
 }
 
+/**
+Calculates an upper bound for the size of the sample area needed to cover all
+all points in the output area.
+*/
+BoundingBox maximum_sample_area(const Arguments& args)
+{
+    float d = std::sqrt(maximum_norm_distance(args.output_area));
+    return {-d, -d, d, d};
+}
+
 void buddhabrot(const Arguments& args, std::vector<int>& histogram)
 {
     std::ranlux48_base engine;
-    std::uniform_real_distribution<float> x_dist(args.sample_area.min_x, args.sample_area.max_x);
-    std::uniform_real_distribution<float> y_dist(args.sample_area.min_y, args.sample_area.max_y);
+    std::uniform_real_distribution<float> x_dist(args.sample_area->min_x, args.sample_area->max_x);
+    std::uniform_real_distribution<float> y_dist(args.sample_area->min_y, args.sample_area->max_y);
     std::vector<std::complex<float>> path;
 
     float norm_limit = maximum_norm_distance(args.output_area);
@@ -146,6 +156,9 @@ int main(int argc, char* argv[])
     {
         return EXIT_FAILURE;
     }
+
+    if (!args.sample_area)
+        args.sample_area = maximum_sample_area(args);
 
     std::cout << "width: " << args.width << "\n";
     std::cout << "height: " << args.height << "\n";

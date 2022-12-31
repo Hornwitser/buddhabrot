@@ -10,6 +10,16 @@
 
 struct ParsingFailed {};
 
+template <typename T>
+std::ostream& operator << (std::ostream& oss, std::optional<T> opt)
+{
+    if (opt)
+        oss << *opt;
+    else
+        oss << "auto";
+    return oss;
+}
+
 struct BoundingBox {
     float min_x, min_y;
     float max_x, max_y;
@@ -25,7 +35,14 @@ struct OptionDescription {
     std::string_view short_name;
     std::string_view long_name;
     std::string_view help;
-    std::optional<std::variant<bool T::*, int32_t T::*, int64_t T::*, std::string T::*, BoundingBox T::*>> field;
+    std::optional<std::variant<
+        bool T::*,
+        int32_t T::*,
+        int64_t T::*,
+        std::string T::*,
+        BoundingBox T::*,
+        std::optional<BoundingBox> T::*
+    >> field;
 };
 
 template <typename T, typename Opts>
@@ -81,49 +98,61 @@ void parse_number(std::string_view value, T& field)
 }
 
 template <typename T>
-int parse_value(int, char* [], T& args, int, bool T::* field)
+int parse_value(int, char* [], T&, int, bool* field)
 {
-    args.*field = true;
+    *field = true;
     return 0;
 }
 
 template <std::integral Int, typename T>
-int parse_value(int argc, char* argv[], T& args, int argp, Int T::* field)
+int parse_value(int argc, char* argv[], T&, int argp, Int* field)
 {
     if (argp >= argc)
     {
         std::cerr << "Expected integer but got end of argument list" << std::endl;
         throw ParsingFailed{};
     }
-    parse_number(argv[argp], args.*field);
+    parse_number(argv[argp], *field);
     return 1;
 }
 
 template <typename T>
-int parse_value(int argc, char* argv[], T& args, int argp, std::string T::* field)
+int parse_value(int argc, char* argv[], T&, int argp, std::string* field)
 {
     if (argp >= argc)
     {
         std::cerr << "Expected string but got end of argument list" << std::endl;
         throw ParsingFailed{};
     }
-    args.*field = argv[argp];
+    *field = argv[argp];
     return 1;
 }
 
 template <typename T>
-int parse_value(int argc, char* argv[], T& args, int argp, BoundingBox T::* field)
+int parse_value(int argc, char* argv[], T&, int argp, BoundingBox* field)
 {
     if (argp + 4 > argc)
     {
         std::cerr << "Expected 4 floats but got end of argument list" << std::endl;
         throw ParsingFailed{};
     }
-    parse_number(argv[argp], (args.*field).min_x);
-    parse_number(argv[argp+1], (args.*field).min_y);
-    parse_number(argv[argp+2], (args.*field).max_x);
-    parse_number(argv[argp+3], (args.*field).max_y);
+    parse_number(argv[argp], (*field).min_x);
+    parse_number(argv[argp+1], (*field).min_y);
+    parse_number(argv[argp+2], (*field).max_x);
+    parse_number(argv[argp+3], (*field).max_y);
     return 4;
+}
+
+template <typename T, typename U>
+int parse_value(int argc, char* argv[], T& args, int argp, std::optional<U>* field)
+{
+    if (argp < argc && std::string_view(argv[argp]) == "auto")
+    {
+        field->reset();
+        return 1;
+    }
+    field->emplace();
+    return parse_value(argc, argv, args, argp, &(field->value()));
 }
 
 
@@ -158,7 +187,9 @@ int parse_opts(int argc, char* argv[], T& args, int argp, const Opts& option_des
     if (!description->field)
         return 0;
 
-    return std::visit([&](auto& field) { return parse_value(argc, argv, args, argp, field); }, *description->field);
+    return std::visit(
+        [&](auto& field) { return parse_value(argc, argv, args, argp, &(args.*field)); }, *description->field
+    );
 }
 
 template <typename T, typename Opts>
