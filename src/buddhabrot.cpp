@@ -85,7 +85,7 @@ void escape_boundnary(const Arguments& args, std::vector<int>& histogram, Perfor
     const BoundingBox& area = args.output_area;
     Mat<3, 3> transform =
         translate(area.min_x, area.min_y) * scale(area.max_x - area.min_x, area.max_y - area.min_y) *
-        inverse(translate(-0.5f, -0.5f) * scale(args.width, args.height))
+        inverse(translate(-0.5f, -0.5f) * scale(args.width, -args.height) * translate(0.f, -1.f))
     ;
     //std::cout << "transform: " << transform << std::endl;
 
@@ -163,7 +163,7 @@ void buddhabrot(const Arguments& args, std::vector<int>& histogram, Performance&
 
     const BoundingBox& area = args.output_area;
     Mat<3, 3> transform =
-        scale(args.width, args.height) *
+        scale(args.width, -args.height) * translate(0.f, -1.f) *
         inverse(translate(area.min_x, area.min_y) * scale(area.max_x - area.min_x, area.max_y - area.min_y))
     ;
     //std::cout << "transform: " << transform << std::endl;
