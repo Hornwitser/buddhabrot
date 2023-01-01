@@ -13,6 +13,7 @@
 
 #include "lodepng.h"
 
+#include "matrix.hpp"
 #include "parse_args.hpp"
 #include "srgb.hpp"
 
@@ -61,20 +62,17 @@ struct Performance {
 void plot_path(
     const Arguments& args,
     const std::vector<std::complex<float>>& path,
+    const Mat<3, 3>& transform,
     std::vector<int>& histogram,
     Performance& perf
 ) {
     int64_t points_output = 0;
     for (const auto& point : path)
     {
-        const BoundingBox& area = args.output_area;
-        float x = (point.real() - area.min_x) / (area.max_x - area.min_x);
-        if (x < 0.f || 1.f <= x)
+        ColVec<3> p = transform * ColVec<3>{point.real(), point.imag(), 1.f};
+        if (p.x() < 0.f || args.width <= p.x() || p.y() < 0.f || args.height <= p.y())
             continue;
-        float y = (point.imag() - area.min_y) / (area.max_y - area.min_y);
-        if (y < 0.f || 1.f <= y)
-            continue;
-        histogram[(int)(x * args.width) + (int)(y * args.height) * args.width] += 1;
+        histogram[(int)(p.x()) + (int)(p.y()) * args.width] += 1;
         points_output++;
     }
 
@@ -84,13 +82,18 @@ void plot_path(
 
 void escape_boundnary(const Arguments& args, std::vector<int>& histogram, Performance& perf)
 {
+    const BoundingBox& area = args.output_area;
+    Mat<3, 3> transform =
+        translate(area.min_x, area.min_y) * scale(area.max_x - area.min_x, area.max_y - area.min_y) *
+        inverse(translate(-0.5f, -0.5f) * scale(args.width, args.height))
+    ;
+    //std::cout << "transform: " << transform << std::endl;
+
     for (decltype(histogram.size()) i = 0; i < histogram.size(); i++)
     {
-        const BoundingBox& area = args.output_area;
-        float x = ((float)(i % args.width) + 0.5f) / args.width * (area.max_x - area.min_x) + area.min_x;
-        float y = ((float)(i / args.width) + 0.5f) / args.height * (area.max_y - area.min_y) + area.min_y;
+        ColVec<3> p = transform * ColVec<3>{(float)(i % args.width), (float)(i / args.width), 1};
 
-        std::complex c(x, y);
+        std::complex c(p.x(), p.y());
         std::complex z = c;
         float norm_c = std::norm(c);
         for (int64_t j = 0; j < args.max_iterations; j++)
@@ -158,6 +161,13 @@ void buddhabrot(const Arguments& args, std::vector<int>& histogram, Performance&
     std::uniform_real_distribution<float> y_dist(args.sample_area->min_y, args.sample_area->max_y);
     std::vector<std::complex<float>> path;
 
+    const BoundingBox& area = args.output_area;
+    Mat<3, 3> transform =
+        scale(args.width, args.height) *
+        inverse(translate(area.min_x, area.min_y) * scale(area.max_x - area.min_x, area.max_y - area.min_y))
+    ;
+    //std::cout << "transform: " << transform << std::endl;
+
     float norm_limit = maximum_norm_distance(args.output_area);
     for (int64_t i = 0; i < args.samples; i++)
     {
@@ -175,7 +185,7 @@ void buddhabrot(const Arguments& args, std::vector<int>& histogram, Performance&
             z = z * z + c;
             if (std::norm(z) > norm_limit)
             {
-                plot_path(args, path, histogram, perf);
+                plot_path(args, path, transform, histogram, perf);
                 perf.samples_output++;
                 break;
             }
