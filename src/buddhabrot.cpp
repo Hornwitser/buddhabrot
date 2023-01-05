@@ -29,8 +29,9 @@ using Seconds = std::chrono::duration<double>;
 struct Arguments {
     PixelSize width = 800;
     PixelSize height = 800;
-    int64_t samples = 1'000'000;
     int64_t max_iterations = 1'000;
+    float samples_per_pixel = 1.f;
+    std::optional<int64_t> samples = std::nullopt;
     std::optional<BoundingBox> sample_area = std::nullopt;
 
     bool escape_boundnary = false;
@@ -38,16 +39,17 @@ struct Arguments {
     std::string output_path = "render.png";
 };
 
-const std::array<OptionDescription<Arguments>, 9> option_descriptions = {
-    "w", "width",          "width of the output image", &Arguments::width,
-    "h", "height",         "height of the output image", &Arguments::height,
-    "s", "samples",        "number of samples to compute", &Arguments::samples,
-    "a", "sample-area",    "area to make random samples in", &Arguments::sample_area,
-    "i", "max-iterations", "maximum number of iterations befor discarding path", &Arguments::max_iterations,
-    "E", "escape",         "compute escape boundnary where magnitute only increases", &Arguments::escape_boundnary,
-    "A", "output-area",    "area to show in output image", &Arguments::output_area,
-    "o", "output-path",    "path to output rendered PNG image", &Arguments::output_path,
-    "?", "help",           "show this help", std::nullopt,
+const std::array<OptionDescription<Arguments>, 10> option_descriptions = {
+    "w", "width",             "width of the output image", &Arguments::width,
+    "h", "height",            "height of the output image", &Arguments::height,
+    "S", "samples-per-pixel", "samples to compute normalized to output pixels", &Arguments::samples_per_pixel,
+    "s", "samples",           "number of samples to compute (overrides -S)", &Arguments::samples,
+    "a", "sample-area",       "area to make random samples in", &Arguments::sample_area,
+    "i", "max-iterations",    "maximum number of iterations befor discarding path", &Arguments::max_iterations,
+    "E", "escape",            "compute escape boundnary where magnitute only increases", &Arguments::escape_boundnary,
+    "A", "output-area",       "area to show in output image", &Arguments::output_area,
+    "o", "output-path",       "path to output rendered PNG image", &Arguments::output_path,
+    "?", "help",              "show this help", std::nullopt,
 };
 
 struct Performance {
@@ -169,7 +171,7 @@ void buddhabrot(const Arguments& args, std::vector<int>& histogram, Performance&
     //std::cout << "transform: " << transform << std::endl;
 
     float norm_limit = maximum_norm_distance(args.output_area);
-    for (int64_t i = 0; i < args.samples; i++)
+    for (int64_t i = 0; i < *args.samples; i++)
     {
         path.clear();
         const std::complex<float> c(x_dist(engine), y_dist(engine));
@@ -192,7 +194,11 @@ void buddhabrot(const Arguments& args, std::vector<int>& histogram, Performance&
         }
     }
 
-    perf.samples_input += args.samples;
+    perf.samples_input += *args.samples;
+}
+
+float area(const BoundingBox& box) {
+    return (box.max_x - box.min_x) * (box.max_y - box.min_y);
 }
 
 int main(int argc, char* argv[])
@@ -213,8 +219,21 @@ int main(int argc, char* argv[])
     if (!args.sample_area)
         args.sample_area = maximum_sample_area(args);
 
+    if (!args.samples)
+        args.samples = std::round(
+            args.samples_per_pixel * args.height * args.width *
+            area(*args.sample_area) / area(args.output_area)
+        );
+    else
+        args.samples_per_pixel =
+            (float)*args.samples / args.height / args.width *
+            area(args.output_area) / area(*args.sample_area)
+        ;
+
+
     std::cout << "width: " << args.width << "\n";
     std::cout << "height: " << args.height << "\n";
+    std::cout << "samples_per_pixel: " << args.samples_per_pixel << "\n";
     std::cout << "samples: " << args.samples << "\n";
     std::cout << "sample_area: " << args.sample_area << "\n";
     std::cout << "max_iterations: " << args.max_iterations << "\n";

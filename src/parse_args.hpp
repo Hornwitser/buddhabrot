@@ -39,6 +39,8 @@ struct OptionDescription {
         bool T::*,
         int32_t T::*,
         int64_t T::*,
+        std::optional<int64_t> T::*,
+        float T::*,
         std::string T::*,
         BoundingBox T::*,
         std::optional<BoundingBox> T::*
@@ -110,6 +112,18 @@ int parse_value(int argc, char* argv[], T&, int argp, Int* field)
     if (argp >= argc)
     {
         std::cerr << "Expected integer but got end of argument list" << std::endl;
+        throw ParsingFailed{};
+    }
+    parse_number(argv[argp], *field);
+    return 1;
+}
+
+template <typename T>
+int parse_value(int argc, char* argv[], T&, int argp, float* field)
+{
+    if (argp >= argc)
+    {
+        std::cerr << "Expected float but got end of argument list" << std::endl;
         throw ParsingFailed{};
     }
     parse_number(argv[argp], *field);
