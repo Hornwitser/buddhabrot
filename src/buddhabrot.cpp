@@ -29,25 +29,29 @@ using Seconds = std::chrono::duration<double>;
 struct Arguments {
     PixelSize width = 800;
     PixelSize height = 800;
+    std::complex<float> centre = {0.f, 0.f};
+    float zoom = 0.25f;
     int64_t max_iterations = 1'000;
     float samples_per_pixel = 1.f;
     std::optional<int64_t> samples = std::nullopt;
     std::optional<BoundingBox> sample_area = std::nullopt;
 
     bool escape_boundnary = false;
-    BoundingBox output_area = { -2.f, -2.f, 2.f, 2.f };
+    std::optional<BoundingBox> output_area = std::nullopt;
     std::string output_path = "render.png";
 };
 
-const std::array<OptionDescription<Arguments>, 10> option_descriptions = {
+const std::array<OptionDescription<Arguments>, 12> option_descriptions = {
     "w", "width",             "width of the output image", &Arguments::width,
     "h", "height",            "height of the output image", &Arguments::height,
+    "c", "centre",            "coordinate of the centre of output image", &Arguments::centre,
+    "z", "zoom",              "zoom level of output image", &Arguments::zoom,
     "S", "samples-per-pixel", "samples to compute normalized to output pixels", &Arguments::samples_per_pixel,
     "s", "samples",           "number of samples to compute (overrides -S)", &Arguments::samples,
     "a", "sample-area",       "area to make random samples in", &Arguments::sample_area,
     "i", "max-iterations",    "maximum number of iterations befor discarding path", &Arguments::max_iterations,
     "E", "escape",            "compute escape boundnary where magnitute only increases", &Arguments::escape_boundnary,
-    "A", "output-area",       "area to show in output image", &Arguments::output_area,
+    "A", "output-area",       "area to show in output image (overrides -c, -z)", &Arguments::output_area,
     "o", "output-path",       "path to output rendered PNG image", &Arguments::output_path,
     "?", "help",              "show this help", std::nullopt,
 };
@@ -84,7 +88,7 @@ void plot_path(
 
 void escape_boundnary(const Arguments& args, std::vector<int>& histogram, Performance& perf)
 {
-    const BoundingBox& area = args.output_area;
+    const BoundingBox& area = *args.output_area;
     Mat<3, 3> transform =
         translate(area.min_x, area.min_y) * scale(area.max_x - area.min_x, area.max_y - area.min_y) *
         inverse(translate(-0.5f, -0.5f) * scale(args.width, -args.height) * translate(0.f, -1.f))
@@ -141,7 +145,7 @@ all points in the output area.
 */
 BoundingBox maximum_sample_area(const Arguments& args)
 {
-    float d = std::sqrt(maximum_norm_distance(args.output_area));
+    float d = std::sqrt(maximum_norm_distance(*args.output_area));
     return {-d, -d, d, d};
 }
 
@@ -163,14 +167,14 @@ void buddhabrot(const Arguments& args, std::vector<int>& histogram, Performance&
     std::uniform_real_distribution<float> y_dist(args.sample_area->min_y, args.sample_area->max_y);
     std::vector<std::complex<float>> path;
 
-    const BoundingBox& area = args.output_area;
+    const BoundingBox& area = *args.output_area;
     Mat<3, 3> transform =
         scale(args.width, -args.height) * translate(0.f, -1.f) *
         inverse(translate(area.min_x, area.min_y) * scale(area.max_x - area.min_x, area.max_y - area.min_y))
     ;
     //std::cout << "transform: " << transform << std::endl;
 
-    float norm_limit = maximum_norm_distance(args.output_area);
+    float norm_limit = maximum_norm_distance(*args.output_area);
     for (int64_t i = 0; i < *args.samples; i++)
     {
         path.clear();
@@ -216,23 +220,41 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
+    if (!args.output_area)
+    {
+        float half_width = 0.5f / args.zoom * (args.width > args.height ? (float)args.width / args.height : 1.f);
+        float half_height = 0.5f / args.zoom * (args.width < args.height ? (float)args.height / args.width : 1.f);
+        args.output_area = {
+            args.centre.real() - half_width, args.centre.imag() - half_height,
+            args.centre.real() + half_width, args.centre.imag() + half_height
+        };
+    }
+    else
+    {
+        const BoundingBox& area = *args.output_area;
+        args.zoom = 1.f / std::min(area.max_x - area.min_x, area.max_y - area.min_y);
+        args.centre = {(area.min_x + area.max_x) / 2.f, (area.min_y + area.max_y) / 2.f};
+    }
+
     if (!args.sample_area)
         args.sample_area = maximum_sample_area(args);
 
     if (!args.samples)
         args.samples = std::round(
             args.samples_per_pixel * args.height * args.width *
-            area(*args.sample_area) / area(args.output_area)
+            area(*args.sample_area) / area(*args.output_area)
         );
     else
         args.samples_per_pixel =
             (float)*args.samples / args.height / args.width *
-            area(args.output_area) / area(*args.sample_area)
+            area(*args.output_area) / area(*args.sample_area)
         ;
 
 
     std::cout << "width: " << args.width << "\n";
     std::cout << "height: " << args.height << "\n";
+    std::cout << "centre: " << args.centre << "\n";
+    std::cout << "zoom: " << args.zoom << "\n";
     std::cout << "samples_per_pixel: " << args.samples_per_pixel << "\n";
     std::cout << "samples: " << args.samples << "\n";
     std::cout << "sample_area: " << args.sample_area << "\n";
