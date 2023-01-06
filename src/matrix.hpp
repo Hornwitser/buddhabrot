@@ -29,11 +29,11 @@ struct RowVec {
 };
 
 template <int Cols>
-RowVec<Cols> operator * (float rhs, RowVec<Cols> lhs)
+RowVec<Cols> operator * (float lhs, RowVec<Cols> rhs)
 {
     for (int n = 0; n < Cols; n++)
-        lhs[n] *= rhs;
-    return lhs;
+        rhs[n] *= lhs;
+    return rhs;
 }
 
 template <int Cols>
@@ -56,6 +56,22 @@ struct ColVec {
     float y() { static_assert(Rows > 1, "index out of bounds"); return col[1]; }
     float z() { static_assert(Rows > 2, "index out of bounds"); return col[2]; }
 };
+
+template <int Rows>
+ColVec<Rows> operator + (ColVec<Rows> lhs, const ColVec<Rows>& rhs)
+{
+    for (int m = 0; m < Rows; m++)
+        lhs[m] += rhs[m];
+    return lhs;
+}
+
+template <int Rows>
+ColVec<Rows> operator * (float lhs, ColVec<Rows> rhs)
+{
+    for (int m = 0; m < Rows; m++)
+        rhs[m] *= lhs;
+    return rhs;
+}
 
 template <int Rows>
 std::ostream& operator << (std::ostream& oss, const ColVec<Rows> col)
