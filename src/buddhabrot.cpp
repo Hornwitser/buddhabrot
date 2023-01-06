@@ -205,6 +205,33 @@ float area(const BoundingBox& box) {
     return (box.max_x - box.min_x) * (box.max_y - box.min_y);
 }
 
+bool write_image(int width, int height, const std::vector<int>& histogram, const std::string& output_path)
+{
+    int64_t max = *std::max_element(histogram.begin(), histogram.end());
+    std::cout << "lagest bucket size: " << max << std::endl;
+
+    std::vector<uint8_t> image(width * height * 4);
+    for (decltype(histogram.size()) i = 0; i < histogram.size(); i++)
+    {
+        uint8_t value = srgb_encoding_gamma((float)histogram[i] / max) * 255;
+        // Write RGBA
+        image[i * 4] = value;
+        image[i * 4 + 1] = value;
+        image[i * 4 + 2] = value;
+        image[i * 4 + 3] = 255;
+    }
+
+    std::cout << "writing " << output_path << std::endl;
+    unsigned error = lodepng::encode(output_path, image, width, height);
+    if (error)
+    {
+        std::cerr << "encode error " << error << ": " << lodepng_error_text(error) << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
 int main(int argc, char* argv[])
 {
     std::cout.setf(std::ios::boolalpha);
@@ -281,27 +308,8 @@ int main(int argc, char* argv[])
     std::cout << "input megasamples/s: " << perf.samples_input / Microseconds(perf.compute_time).count() << "\n";
     std::cout << "output megapoints/s: " << perf.points_output / Microseconds(perf.compute_time).count() << "\n";
 
-    int64_t max = *std::max_element(histogram.begin(), histogram.end());
-    std::cout << "lagest bucket size: " << max << std::endl;
-
-    std::vector<uint8_t> image(args.width * args.height * 4);
-    for (uint64_t i = 0; i < histogram.size(); i++)
-    {
-        uint8_t value = srgb_encoding_gamma((float)histogram[i] / max) * 255;
-        // Write RGBA
-        image[i * 4] = value;
-        image[i * 4 + 1] = value;
-        image[i * 4 + 2] = value;
-        image[i * 4 + 3] = 255;
-    }
-
-    std::cout << "writing " << args.output_path << std::endl;
-    unsigned error = lodepng::encode(args.output_path, image, args.width, args.height);
-    if (error)
-    {
-        std::cerr << "encode error " << error << ": " << lodepng_error_text(error) << std::endl;
+    if (!write_image(args.width, args.height, histogram, args.output_path))
         return EXIT_FAILURE;
-    }
 
     return EXIT_SUCCESS;
 }
