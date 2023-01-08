@@ -38,13 +38,14 @@ struct Arguments {
     int32_t mask_size = 1000;
     int32_t mask_edge_points = 4;
     std::string mask_output_path = "";
+    std::string point_density_output_path = "";
 
     bool escape_boundnary = false;
     std::optional<BoundingBox> output_area = std::nullopt;
     std::string output_path = "render.png";
 };
 
-const std::array<OptionDescription<Arguments>, 15> option_descriptions = {
+const std::array<OptionDescription<Arguments>, 16> option_descriptions = {
     "w", "width",             "width of the output image", &Arguments::width,
     "h", "height",            "height of the output image", &Arguments::height,
     "c", "centre",            "coordinate of the centre of output image", &Arguments::centre,
@@ -56,6 +57,7 @@ const std::array<OptionDescription<Arguments>, 15> option_descriptions = {
     "m", "mask-size",         "size of mandelbrot mask to use (0 for off)", &Arguments::mask_size,
     "e", "mask-edge-points",  "number of points to check along edges of the mask", &Arguments::mask_edge_points,
     "M", "mask-output-path",  "path to output mask for debugging", &Arguments::mask_output_path,
+    "P", "point-output-path", "path to output point density map for debugging", &Arguments::point_density_output_path,
     "E", "escape",            "compute escape boundnary where magnitute only increases", &Arguments::escape_boundnary,
     "A", "output-area",       "area to show in output image (overrides -c, -z)", &Arguments::output_area,
     "o", "output-path",       "path to output rendered PNG image", &Arguments::output_path,
@@ -249,6 +251,7 @@ void buddhabrot(
     const Arguments& args,
     const std::vector<bool>& mask,
     std::vector<int>& histogram,
+    std::vector<int>& point_density,
     Performance& perf
 ) {
     std::ranlux48_base engine;
@@ -269,6 +272,7 @@ void buddhabrot(
         float x = i % args.mask_size;
         float y = i / args.mask_size;
 
+        int64_t start_points = perf.points_output;
         for (int64_t j = 0; j < samples_per_mask_box; j++)
         {
             perf.samples_mask++;
@@ -293,6 +297,7 @@ void buddhabrot(
                 }
             }
         }
+        point_density[i] = perf.points_output - start_points;
     }
 
     perf.samples_input += mask.size() * samples_per_mask_box;
@@ -410,9 +415,14 @@ int main(int argc, char* argv[])
             if (args.mask_output_path.size())
                 write_image(args.mask_size, args.mask_size, mask, args.mask_output_path);
         }
+
+        std::vector<int> point_density(args.mask_size * args.mask_size);
         Clock::time_point buddhabrot_start = Clock::now();
-        buddhabrot(args, mask, histogram, perf);
+        buddhabrot(args, mask, histogram, point_density, perf);
         perf.buddhabrot_time = Clock::now() - buddhabrot_start;
+
+        if (args.point_density_output_path.size())
+            write_image(args.mask_size, args.mask_size, point_density, args.point_density_output_path);
     }
     perf.compute_time = Clock::now() - start;
 
