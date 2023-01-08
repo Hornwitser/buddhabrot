@@ -37,6 +37,7 @@ struct Arguments {
     std::optional<BoundingBox> sample_area = std::nullopt;
     int32_t mask_size = 1000;
     int32_t mask_edge_points = 4;
+    std::optional<int64_t> mask_min_samples = std::nullopt;
     std::string mask_output_path = "";
     std::string point_density_output_path = "";
 
@@ -45,7 +46,7 @@ struct Arguments {
     std::string output_path = "render.png";
 };
 
-const std::array<OptionDescription<Arguments>, 16> option_descriptions = {
+const std::array<OptionDescription<Arguments>, 17> option_descriptions = {
     "w", "width",             "width of the output image", &Arguments::width,
     "h", "height",            "height of the output image", &Arguments::height,
     "c", "centre",            "coordinate of the centre of output image", &Arguments::centre,
@@ -56,6 +57,7 @@ const std::array<OptionDescription<Arguments>, 16> option_descriptions = {
     "i", "max-iterations",    "maximum number of iterations befor discarding path", &Arguments::max_iterations,
     "m", "mask-size",         "size of mandelbrot mask to use (0 for off)", &Arguments::mask_size,
     "e", "mask-edge-points",  "number of points to check along edges of the mask", &Arguments::mask_edge_points,
+    "I", "mask-min-samples",  "minimum number of samples to check before bailing", &Arguments::mask_min_samples,
     "M", "mask-output-path",  "path to output mask for debugging", &Arguments::mask_output_path,
     "P", "point-output-path", "path to output point density map for debugging", &Arguments::point_density_output_path,
     "E", "escape",            "compute escape boundnary where magnitute only increases", &Arguments::escape_boundnary,
@@ -94,7 +96,7 @@ Mat<3, 3> image_to_area(int width, int height, const BoundingBox& area, bool cen
     ;
 }
 
-void plot_path(
+bool plot_path(
     const Arguments& args,
     const std::vector<std::complex<float>>& path,
     const Mat<3, 3>& transform,
@@ -113,6 +115,7 @@ void plot_path(
 
     perf.points_input += path.size();
     perf.points_output += points_output;
+    return points_output;
 }
 
 void escape_boundnary(const Arguments& args, std::vector<int>& histogram, Performance& perf)
@@ -263,6 +266,7 @@ void buddhabrot(
     //std::cout << "transform: " << transform << std::endl;
 
     int64_t samples_per_mask_box = std::ceil((float)*args.samples / mask.size());
+    std::cout << "samples per mask box: " << samples_per_mask_box << std::endl;
     float norm_limit = maximum_norm_distance(*args.output_area);
     for (decltype(mask.size()) i = 0; i < mask.size(); i++)
     {
@@ -273,8 +277,12 @@ void buddhabrot(
         float y = i / args.mask_size;
 
         int64_t start_points = perf.points_output;
+        bool has_points = false;
         for (int64_t j = 0; j < samples_per_mask_box; j++)
         {
+            if (!has_points && *args.mask_min_samples && j > *args.mask_min_samples)
+                break;
+
             perf.samples_mask++;
             ColVec<3> p = mask_transform * ColVec<3>{x + dist(engine), y + dist(engine), 1.f};
             const std::complex<float> c(p.x(), p.y());
@@ -291,7 +299,8 @@ void buddhabrot(
                 z = z * z + c;
                 if (std::norm(z) > norm_limit)
                 {
-                    plot_path(args, path, transform, histogram, perf);
+                    if (plot_path(args, path, transform, histogram, perf))
+                        has_points = true;
                     perf.samples_output++;
                     break;
                 }
@@ -380,6 +389,8 @@ int main(int argc, char* argv[])
             area(*args.output_area) / area(*args.sample_area)
         ;
 
+    if (!args.mask_min_samples)
+        args.mask_min_samples = std::sqrt(*args.samples / std::max(args.mask_size * args.mask_size, 1));
 
     std::cout << "width: " << args.width << "\n";
     std::cout << "height: " << args.height << "\n";
@@ -390,6 +401,7 @@ int main(int argc, char* argv[])
     std::cout << "sample_area: " << args.sample_area << "\n";
     std::cout << "mask_size: " << args.mask_size << "\n";
     std::cout << "mask_edge_points: " << args.mask_edge_points << "\n";
+    std::cout << "mask_min_samples: " << args.mask_min_samples << "\n";
     std::cout << "max_iterations: " << args.max_iterations << "\n";
     std::cout << "escape_boundnary: " << args.escape_boundnary << "\n";
     std::cout << "output_area: " << args.output_area << "\n";
