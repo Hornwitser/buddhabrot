@@ -75,6 +75,23 @@ struct Performance {
     Clock::duration compute_time = Clock::duration(0);
 };
 
+Mat<3, 3> area_to_image(const BoundingBox& area, int width, int height)
+{
+    return
+        scale(width, -height) * translate(0.f, -1.f) *
+        inverse(translate(area.min_x, area.min_y) * scale(area.max_x - area.min_x, area.max_y - area.min_y))
+    ;
+}
+
+Mat<3, 3> image_to_area(int width, int height, const BoundingBox& area, bool centre = false)
+{
+    float shift = centre ? -0.5f : 0.f;
+    return
+        translate(area.min_x, area.min_y) * scale(area.max_x - area.min_x, area.max_y - area.min_y) *
+        inverse(translate(shift, shift) * scale(width, -height) * translate(0.f, -1.f))
+    ;
+}
+
 void plot_path(
     const Arguments& args,
     const std::vector<std::complex<float>>& path,
@@ -98,11 +115,7 @@ void plot_path(
 
 void escape_boundnary(const Arguments& args, std::vector<int>& histogram, Performance& perf)
 {
-    const BoundingBox& area = *args.output_area;
-    Mat<3, 3> transform =
-        translate(area.min_x, area.min_y) * scale(area.max_x - area.min_x, area.max_y - area.min_y) *
-        inverse(translate(-0.5f, -0.5f) * scale(args.width, -args.height) * translate(0.f, -1.f))
-    ;
+    Mat<3, 3> transform = image_to_area(args.width, args.height, *args.output_area, true);
     //std::cout << "transform: " << transform << std::endl;
 
     for (decltype(histogram.size()) i = 0; i < histogram.size(); i++)
@@ -188,11 +201,7 @@ bool inside_mandelbrot(std::complex<float> c, int max_iterations, float norm_lim
 
 void mandelbrot_mask(const Arguments& args, std::vector<bool>& mask, Performance& perf)
 {
-    const BoundingBox& area = *args.sample_area;
-    Mat<3, 3> transform =
-        translate(area.min_x, area.min_y) * scale(area.max_x - area.min_x, area.max_y - area.min_y) *
-        inverse(scale(args.mask_size, -args.mask_size) * translate(0.f, -1.f))
-    ;
+    Mat<3, 3> transform = image_to_area(args.mask_size, args.mask_size, *args.sample_area);
     //std::cout << "transform: " << transform << std::endl;
     float norm_limit = maximum_norm_distance(*args.output_area);
 
@@ -247,19 +256,9 @@ void buddhabrot(
     std::uniform_real_distribution<float> y_dist(args.sample_area->min_y, args.sample_area->max_y);
     std::vector<std::complex<float>> path;
 
-    const BoundingBox& area = *args.output_area;
-    Mat<3, 3> transform =
-        scale(args.width, -args.height) * translate(0.f, -1.f) *
-        inverse(translate(area.min_x, area.min_y) * scale(area.max_x - area.min_x, area.max_y - area.min_y))
-    ;
+    Mat<3, 3> transform = area_to_image(*args.output_area, args.width, args.height);
+    Mat<3, 3> mask_transform = area_to_image(*args.sample_area, args.mask_size, args.mask_size);
     //std::cout << "transform: " << transform << std::endl;
-
-    const BoundingBox& mask_area = *args.sample_area;
-    Mat<3, 3> mask_transform =
-        scale(args.mask_size, -args.mask_size) * translate(0.f, -1.f) *
-        inverse(translate(mask_area.min_x, mask_area.min_y) *
-        scale(mask_area.max_x - mask_area.min_x, mask_area.max_y - mask_area.min_y))
-    ;
 
     float norm_limit = maximum_norm_distance(*args.output_area);
     for (int64_t i = 0; i < *args.samples; i++)
