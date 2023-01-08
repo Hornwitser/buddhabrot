@@ -252,49 +252,50 @@ void buddhabrot(
     Performance& perf
 ) {
     std::ranlux48_base engine;
-    std::uniform_real_distribution<float> x_dist(args.sample_area->min_x, args.sample_area->max_x);
-    std::uniform_real_distribution<float> y_dist(args.sample_area->min_y, args.sample_area->max_y);
+    std::uniform_real_distribution<float> dist(0.f, 1.f);
     std::vector<std::complex<float>> path;
 
     Mat<3, 3> transform = area_to_image(*args.output_area, args.width, args.height);
-    Mat<3, 3> mask_transform = area_to_image(*args.sample_area, args.mask_size, args.mask_size);
+    Mat<3, 3> mask_transform = image_to_area(args.mask_size, args.mask_size, *args.sample_area);
     //std::cout << "transform: " << transform << std::endl;
 
+    int64_t samples_per_mask_box = std::ceil((float)*args.samples / mask.size());
     float norm_limit = maximum_norm_distance(*args.output_area);
-    for (int64_t i = 0; i < *args.samples; i++)
+    for (decltype(mask.size()) i = 0; i < mask.size(); i++)
     {
-        path.clear();
-        const std::complex<float> c(x_dist(engine), y_dist(engine));
-
-        if (inside_cardioid(c) || inside_period2_bulb(c))
+        if (mask[i])
             continue;
 
-        perf.samples_mask++;
-        if (args.mask_size)
-        {
-            ColVec<3> p = mask_transform * ColVec<3>{c.real(), c.imag(), 1.f};
-            if (p.x() < 0.f || args.mask_size <= p.x() || p.y() < 0.f || args.mask_size <= p.y())
-                continue;
-            if (mask[(int)(p.x()) + (int)(p.y()) * args.mask_size])
-                continue;
-        }
+        float x = i % args.mask_size;
+        float y = i / args.mask_size;
 
-        perf.samples_iterate++;
-        std::complex z = c;
-        for (int64_t j = 0; j < args.max_iterations; j++)
+        for (int64_t j = 0; j < samples_per_mask_box; j++)
         {
-            path.push_back(z);
-            z = z * z + c;
-            if (std::norm(z) > norm_limit)
+            perf.samples_mask++;
+            ColVec<3> p = mask_transform * ColVec<3>{x + dist(engine), y + dist(engine), 1.f};
+            const std::complex<float> c(p.x(), p.y());
+
+            if (inside_cardioid(c) || inside_period2_bulb(c))
+                continue;
+
+            perf.samples_iterate++;
+            path.clear();
+            std::complex z = c;
+            for (int64_t j = 0; j < args.max_iterations; j++)
             {
-                plot_path(args, path, transform, histogram, perf);
-                perf.samples_output++;
-                break;
+                path.push_back(z);
+                z = z * z + c;
+                if (std::norm(z) > norm_limit)
+                {
+                    plot_path(args, path, transform, histogram, perf);
+                    perf.samples_output++;
+                    break;
+                }
             }
         }
     }
 
-    perf.samples_input += *args.samples;
+    perf.samples_input += mask.size() * samples_per_mask_box;
 }
 
 float area(const BoundingBox& box) {
@@ -396,8 +397,10 @@ int main(int argc, char* argv[])
         escape_boundnary(args, histogram, perf);
     else
     {
+        if (args.mask_size < 1)
+            args.mask_size = 1;
         std::vector<bool> mask(args.mask_size * args.mask_size);
-        if (args.mask_size)
+        if (args.mask_size > 1)
         {
             mandelbrot_mask(args, mask, perf);
             perf.mask_time = Clock::now() - start;
