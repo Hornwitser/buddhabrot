@@ -323,19 +323,17 @@ bool write_image(int64_t width, int64_t height, const std::vector<T>& histogram,
     int64_t max = *std::max_element(histogram.begin(), histogram.end());
     std::cout << "lagest bucket size: " << max << std::endl;
 
-    std::vector<uint8_t> image(width * height * 4);
+    std::vector<uint8_t> image(width * height * 2);
     for (decltype(histogram.size()) i = 0; i < histogram.size(); i++)
     {
-        uint8_t value = srgb_encoding_gamma((float)histogram[i] / max) * 255;
-        // Write RGBA
-        image[i * 4] = value;
-        image[i * 4 + 1] = value;
-        image[i * 4 + 2] = value;
-        image[i * 4 + 3] = 255;
+        // Note: This assumes passing 1.0f to srgb_encoding_gamma results in a value less than 1.0f being output.
+        uint16_t value = srgb_encoding_gamma((float)histogram[i] / max) * 0x10000;
+        image[i * 2] = value >> 8;
+        image[i * 2 + 1] = value & 0xff;
     }
 
     std::cout << "writing " << output_path << std::endl;
-    unsigned error = lodepng::encode(output_path, image, width, height);
+    unsigned error = lodepng::encode(output_path, image, width, height, LCT_GREY, 16);
     if (error)
     {
         std::cerr << "encode error " << error << ": " << lodepng_error_text(error) << std::endl;
