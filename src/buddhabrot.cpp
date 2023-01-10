@@ -253,7 +253,7 @@ void buddhabrot(
     const Arguments& args,
     const std::vector<bool>& mask,
     std::vector<int>& histogram,
-    std::vector<int>& point_density,
+    std::optional<std::vector<int>>& point_density,
     Performance& perf
 ) {
     std::ranlux48_base engine;
@@ -305,7 +305,8 @@ void buddhabrot(
                 }
             }
         }
-        point_density[i] = perf.points_output - start_points;
+        if (point_density)
+            (*point_density)[i] = perf.points_output - start_points;
     }
 
     perf.samples_input += mask.size() * samples_per_mask_box;
@@ -427,13 +428,16 @@ int main(int argc, char* argv[])
                 write_image(args.mask_size, args.mask_size, mask, args.mask_output_path);
         }
 
-        std::vector<int> point_density(args.mask_size * args.mask_size);
+        std::optional<std::vector<int>> point_density;
+        if (args.point_density_output_path.size())
+            point_density = std::vector<int>(args.mask_size * args.mask_size);
+
         Clock::time_point buddhabrot_start = Clock::now();
         buddhabrot(args, mask, histogram, point_density, perf);
         perf.buddhabrot_time = Clock::now() - buddhabrot_start;
 
         if (args.point_density_output_path.size())
-            write_image(args.mask_size, args.mask_size, point_density, args.point_density_output_path);
+            write_image(args.mask_size, args.mask_size, *point_density, args.point_density_output_path);
     }
     perf.compute_time = Clock::now() - start;
 
