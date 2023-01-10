@@ -19,6 +19,7 @@
 
 
 using std::int32_t;
+using std::uint32_t;
 using std::int64_t;
 
 using Clock = std::chrono::steady_clock;
@@ -99,7 +100,7 @@ bool plot_path(
     const Arguments& args,
     const std::vector<std::complex<float>>& path,
     const Mat<3, 3>& transform,
-    std::vector<int>& histogram,
+    std::vector<uint32_t>& histogram,
     Performance& perf
 ) {
     int64_t points_output = 0;
@@ -117,7 +118,7 @@ bool plot_path(
     return points_output;
 }
 
-void escape_boundnary(const Arguments& args, std::vector<int>& histogram, Performance& perf)
+void escape_boundnary(const Arguments& args, std::vector<uint32_t>& histogram, Performance& perf)
 {
     Mat<3, 3> transform = image_to_area(args.width, args.height, *args.output_area, true);
     //std::cout << "transform: " << transform << std::endl;
@@ -187,7 +188,7 @@ bool inside_period2_bulb(std::complex<float> c)
     return std::pow(c.real() + 1.f, 2.f) + std::pow(c.imag(), 2) <= 1.f / 16.f;
 }
 
-bool inside_mandelbrot(std::complex<float> c, int max_iterations, float norm_limit)
+bool inside_mandelbrot(std::complex<float> c, int64_t max_iterations, float norm_limit)
 {
     if (inside_cardioid(c) || inside_period2_bulb(c))
         return true;
@@ -252,8 +253,8 @@ outside:;
 void buddhabrot(
     const Arguments& args,
     const std::vector<bool>& mask,
-    std::vector<int>& histogram,
-    std::optional<std::vector<int>>& point_density,
+    std::vector<uint32_t>& histogram,
+    std::optional<std::vector<uint32_t>>& point_density,
     Performance& perf
 ) {
     std::ranlux48_base engine;
@@ -407,7 +408,7 @@ int main(int argc, char* argv[])
     std::cout << "output_area: " << args.output_area << "\n";
     std::cout << "output_path: " << args.output_path << "\n";
 
-    std::vector<int> histogram(args.width * args.height);
+    std::vector<uint32_t> histogram(args.width * args.height);
     Performance perf;
     Clock::time_point start = Clock::now();
     if (args.escape_boundnary)
@@ -428,9 +429,9 @@ int main(int argc, char* argv[])
                 write_image(args.mask_size, args.mask_size, mask, args.mask_output_path);
         }
 
-        std::optional<std::vector<int>> point_density;
+        std::optional<std::vector<uint32_t>> point_density;
         if (args.point_density_output_path.size())
-            point_density = std::vector<int>(args.mask_size * args.mask_size);
+            point_density = std::vector<uint32_t>(args.mask_size * args.mask_size);
 
         Clock::time_point buddhabrot_start = Clock::now();
         buddhabrot(args, mask, histogram, point_density, perf);
