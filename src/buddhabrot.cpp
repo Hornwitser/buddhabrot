@@ -257,7 +257,7 @@ void buddhabrot(
     std::optional<std::vector<uint32_t>>& point_density,
     Performance& perf
 ) {
-    std::ranlux48_base engine;
+    std::mt19937 engine;
     std::uniform_real_distribution<float> dist(0.f, 1.f);
     std::vector<std::complex<float>> path;
 
