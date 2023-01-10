@@ -21,21 +21,20 @@
 using std::int32_t;
 using std::int64_t;
 
-using PixelSize = int32_t;
 using Clock = std::chrono::steady_clock;
 using Microseconds = std::chrono::duration<double, std::micro>;
 using Seconds = std::chrono::duration<double>;
 
 struct Arguments {
-    PixelSize width = 800;
-    PixelSize height = 800;
+    int64_t width = 800;
+    int64_t height = 800;
     std::complex<float> centre = {0.f, 0.f};
     float zoom = 0.25f;
     int64_t max_iterations = 1'000;
     float samples_per_pixel = 1.f;
     std::optional<int64_t> samples = std::nullopt;
     std::optional<BoundingBox> sample_area = std::nullopt;
-    int32_t mask_size = 1000;
+    int64_t mask_size = 1000;
     int32_t mask_edge_points = 4;
     std::optional<int64_t> mask_min_samples = std::nullopt;
     std::string mask_output_path = "";
@@ -79,7 +78,7 @@ struct Performance {
     Clock::duration compute_time = Clock::duration(0);
 };
 
-Mat<3, 3> area_to_image(const BoundingBox& area, int width, int height)
+Mat<3, 3> area_to_image(const BoundingBox& area, int64_t width, int64_t height)
 {
     return
         scale(width, -height) * translate(0.f, -1.f) *
@@ -87,7 +86,7 @@ Mat<3, 3> area_to_image(const BoundingBox& area, int width, int height)
     ;
 }
 
-Mat<3, 3> image_to_area(int width, int height, const BoundingBox& area, bool centre = false)
+Mat<3, 3> image_to_area(int64_t width, int64_t height, const BoundingBox& area, bool centre = false)
 {
     float shift = centre ? -0.5f : 0.f;
     return
@@ -109,7 +108,7 @@ bool plot_path(
         ColVec<3> p = transform * ColVec<3>{point.real(), point.imag(), 1.f};
         if (p.x() < 0.f || args.width <= p.x() || p.y() < 0.f || args.height <= p.y())
             continue;
-        histogram[(int)(p.x()) + (int)(p.y()) * args.width] += 1;
+        histogram[(int64_t)(p.x()) + (int64_t)(p.y()) * args.width] += 1;
         points_output++;
     }
 
@@ -317,7 +316,7 @@ float area(const BoundingBox& box) {
 }
 
 template <typename T>
-bool write_image(int width, int height, const std::vector<T>& histogram, const std::string& output_path)
+bool write_image(int64_t width, int64_t height, const std::vector<T>& histogram, const std::string& output_path)
 {
     int64_t max = *std::max_element(histogram.begin(), histogram.end());
     std::cout << "lagest bucket size: " << max << std::endl;
@@ -390,7 +389,7 @@ int main(int argc, char* argv[])
         ;
 
     if (!args.mask_min_samples)
-        args.mask_min_samples = std::sqrt(*args.samples / std::max(args.mask_size * args.mask_size, 1));
+        args.mask_min_samples = std::sqrt(*args.samples / std::max(args.mask_size * args.mask_size, (int64_t)1));
 
     std::cout << "width: " << args.width << "\n";
     std::cout << "height: " << args.height << "\n";
