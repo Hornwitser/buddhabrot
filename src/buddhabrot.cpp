@@ -3,7 +3,6 @@
 #include <chrono>
 #include <complex>
 #include <iostream>
-#include <random>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -257,13 +256,17 @@ void buddhabrot(
     std::optional<std::vector<uint32_t>>& point_density,
     Performance& perf
 ) {
-    std::mt19937 engine;
-    std::uniform_real_distribution<float> dist(0.f, 1.f);
     std::vector<std::complex<float>> path;
 
     Mat<3, 3> transform = area_to_image(*args.output_area, args.width, args.height);
     Mat<3, 3> mask_transform = image_to_area(args.mask_size, args.mask_size, *args.sample_area);
     //std::cout << "transform: " << transform << std::endl;
+
+    // Using Roberts' sequence to select sample points.
+    // See http://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/
+    const float g = 1.32471795724474602596f;
+    const float a1 = 1.f / g;
+    const float a2 = 1.f / (g * g);
 
     int64_t samples_per_mask_box = std::ceil((float)*args.samples / mask.size());
     std::cout << "samples per mask box: " << samples_per_mask_box << std::endl;
@@ -275,6 +278,8 @@ void buddhabrot(
 
         float x = i % args.mask_size;
         float y = i / args.mask_size;
+        float xoff = 0.5f;
+        float yoff = 0.5f;
 
         int64_t start_points = perf.points_output;
         bool has_points = false;
@@ -284,7 +289,9 @@ void buddhabrot(
                 break;
 
             perf.samples_mask++;
-            ColVec<3> p = mask_transform * ColVec<3>{x + dist(engine), y + dist(engine), 1.f};
+            ColVec<3> p = mask_transform * ColVec<3>{x + xoff, y + yoff, 1.f};
+            xoff = std::fmod(xoff + a1, 1.f);
+            yoff = std::fmod(yoff + a2, 1.f);
             const std::complex<float> c(p.x(), p.y());
 
             if (inside_cardioid(c) || inside_period2_bulb(c))
