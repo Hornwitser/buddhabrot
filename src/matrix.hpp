@@ -116,8 +116,8 @@ float operator * (const RowVec<N>& lhs, const ColVec<N>& rhs)
     return result;
 }
 
-template <int Rows, int Cols>
-ColVec<Rows> operator * (const Mat<Rows, Cols>& lhs, const ColVec<Rows>& rhs)
+template <int Rows, int Shared>
+ColVec<Rows> operator * (const Mat<Rows, Shared>& lhs, const ColVec<Shared>& rhs)
 {
     ColVec<Rows> result;
     for (int m = 0; m < Rows; m++)
@@ -125,12 +125,12 @@ ColVec<Rows> operator * (const Mat<Rows, Cols>& lhs, const ColVec<Rows>& rhs)
     return result;
 }
 
-template <int Rows, int Cols>
-RowVec<Cols> operator * (const RowVec<Rows>& lhs, const Mat<Rows, Cols>& rhs)
+template <int Shared, int Cols>
+RowVec<Cols> operator * (const RowVec<Shared>& lhs, const Mat<Shared, Cols>& rhs)
 {
-    RowVec<Rows> result;
+    RowVec<Cols> result;
     for (int n = 0; n < Cols; n++)
-        result[n] = lhs * rhs[n];
+        result[n] = lhs * rhs.col(n);
     return result;
 }
 
