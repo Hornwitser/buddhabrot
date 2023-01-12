@@ -89,6 +89,16 @@ struct Mat {
     RowVec<Cols>& operator [] (int m) { return rows[m]; }
     const RowVec<Cols>& operator [] (int m) const { return rows[m]; }
 
+    template <int DstRows, int DstCols>
+    explicit operator Mat<DstRows, DstCols>()
+    {
+        Mat<DstRows, DstCols> result;
+        for (int m = 0; m < DstRows; m++)
+            for (int n = 0; n < DstCols; n++)
+                result.rows[m].row[n] = (m < Rows && n < Cols) ? rows[m].row[n] : m == n;
+        return result;
+    }
+
     const ColVec<Rows> col(int n) const
     {
         ColVec<Rows> column;
@@ -160,6 +170,16 @@ Mat<3, 3> scale(float x, float y)
         0.f,   y, 0.f,
         0.f, 0.f, 1.f,
     };
+}
+
+template <int N>
+Mat<N, N> transpose(const Mat<N, N>& input)
+{
+    Mat<N, N> output;
+    for (int m = 0; m < N; m++)
+        for (int n = 0; n < N; n++)
+            output.rows[m][n] = input[n][m];
+    return output;
 }
 
 /**

@@ -100,12 +100,12 @@ Mat<3, 3> image_to_area(int64_t width, int64_t height, const BoundingBox& area, 
 void plot_path(
     const Arguments& args,
     const std::vector<std::complex<float>>& path,
-    const Mat<3, 3>& transform,
+    const Mat<4, 4>& t_transform,
     std::vector<uint32_t>& histogram
 ) {
     for (const auto& point : path)
     {
-        ColVec<3> p = transform * ColVec<3>{point.real(), point.imag(), 1.f};
+        RowVec<4> p = RowVec<4>{point.real(), point.imag(), 1.f} * t_transform;
         histogram[(int64_t)(p.x()) + (int64_t)(p.y()) * args.width] += 1;
     }
 }
@@ -315,6 +315,8 @@ void buddhabrot(
     //std::cout << "transform: " << transform << std::endl;
 
     const BoundingBox limit = area_limit(transform, args.width, args.height);
+    Mat<4, 4> t_transform = static_cast<Mat<4, 4>>(transpose(transform));
+    Mat<4, 4> t_mask_transform = static_cast<Mat<4, 4>>(transpose(mask_transform));
 
     // Using Roberts' sequence to select sample points.
     // See http://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/
@@ -343,7 +345,7 @@ void buddhabrot(
                 break;
 
             perf.samples_mask++;
-            ColVec<3> p = mask_transform * ColVec<3>{x + xoff, y + yoff, 1.f};
+            RowVec<4> p = RowVec<4>{x + xoff, y + yoff, 1.f} * t_mask_transform;
             xoff = std::fmod(xoff + a1, 1.f);
             yoff = std::fmod(yoff + a2, 1.f);
             const std::complex<float> c(p.x(), p.y());
@@ -368,7 +370,7 @@ void buddhabrot(
                     if (path.size())
                     {
                         perf.points_output += path.size();
-                        plot_path(args, path, transform, histogram);
+                        plot_path(args, path, t_transform, histogram);
                         has_points = true;
                     }
                     perf.samples_output++;
