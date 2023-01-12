@@ -3,10 +3,12 @@
 #include <chrono>
 #include <complex>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include <cmath>
 #include <cstdlib>
 #include <cstdint>
 
@@ -95,26 +97,17 @@ Mat<3, 3> image_to_area(int64_t width, int64_t height, const BoundingBox& area, 
     ;
 }
 
-bool plot_path(
+void plot_path(
     const Arguments& args,
     const std::vector<std::complex<float>>& path,
     const Mat<3, 3>& transform,
-    std::vector<uint32_t>& histogram,
-    Performance& perf
+    std::vector<uint32_t>& histogram
 ) {
-    int64_t points_output = 0;
     for (const auto& point : path)
     {
         ColVec<3> p = transform * ColVec<3>{point.real(), point.imag(), 1.f};
-        if (p.x() < 0.f || args.width <= p.x() || p.y() < 0.f || args.height <= p.y())
-            continue;
         histogram[(int64_t)(p.x()) + (int64_t)(p.y()) * args.width] += 1;
-        points_output++;
     }
-
-    perf.points_input += path.size();
-    perf.points_output += points_output;
-    return points_output;
 }
 
 void escape_boundnary(const Arguments& args, std::vector<uint32_t>& histogram, Performance& perf)
@@ -249,6 +242,65 @@ outside:;
     perf.mask_samples += samples;
 }
 
+// Compute an axis aligned bounding box such that points inside it are contained
+// completely within the image boorders. This allows checking for for whether a point
+// is inside the image area without having to first transform it.
+BoundingBox area_limit(Mat<3, 3> image_transform, int64_t width, int64_t height)
+{
+    // Start with an oversized approximation
+    ColVec<3> bottom_left = inverse(image_transform) * ColVec<3>{0.f, (float)height, 1.f};
+    ColVec<3> top_right = inverse(image_transform) * ColVec<3>{(float)width, 0.f, 1.f};
+    float output_width = top_right.x() - bottom_left.x();
+    float output_height = top_right.y() - bottom_left.y();
+    float shift = 2.f * std::numeric_limits<float>::epsilon();
+    BoundingBox limit = {
+        bottom_left.x() - shift * output_width, bottom_left.y() - shift * output_height,
+        top_right.x() + shift * output_width, top_right.y() + shift * output_height,
+    };
+
+    // Walk back the approximation until the bounding box is inside the image
+    bool min_solution = false;
+    bool max_solution = false;
+    for (int i = 0; i < 1000; i++)
+    {
+        ColVec<3> p = image_transform * ColVec<3>{limit.min_x, limit.min_y, 1.f};
+        if (p.x() < 0.f)
+            limit.min_x = std::nextafter(limit.min_x, INFINITY);
+        if (p.y() >= height)
+            limit.min_y = std::nextafter(limit.min_y, INFINITY);
+        if (p.x() >= 0.f && p.y() < height)
+        {
+            min_solution = true;
+            break;
+        }
+    }
+
+    for (int i = 0; i < 1000; i++)
+    {
+        ColVec<3> p = image_transform * ColVec<3>{limit.max_x, limit.max_y, 1.f};
+        if (p.x() >= width)
+            limit.max_x = std::nextafter(limit.max_x, -INFINITY);
+        if (p.y() < 0.f)
+            limit.max_y = std::nextafter(limit.max_y, -INFINITY);
+        if (p.x() < width && p.y() >= 0.f)
+        {
+            max_solution = true;
+            break;
+        }
+    }
+
+    if (!min_solution || !max_solution)
+    {
+        std::cerr.precision(10);
+        std::cerr << "area_limit failed to find a solution for " << image_transform << "\n";
+        std::cerr << "width " << width << "\n";
+        std::cerr << "height " << width << "\n";
+        std::cerr << "approximation " << limit << "\n";
+        std::exit(EXIT_FAILURE);
+    }
+    return limit;
+}
+
 void buddhabrot(
     const Arguments& args,
     const std::vector<bool>& mask,
@@ -261,6 +313,8 @@ void buddhabrot(
     Mat<3, 3> transform = area_to_image(*args.output_area, args.width, args.height);
     Mat<3, 3> mask_transform = image_to_area(args.mask_size, args.mask_size, *args.sample_area);
     //std::cout << "transform: " << transform << std::endl;
+
+    const BoundingBox limit = area_limit(transform, args.width, args.height);
 
     // Using Roberts' sequence to select sample points.
     // See http://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/
@@ -302,12 +356,21 @@ void buddhabrot(
             std::complex z = c;
             for (int64_t j = 0; j < args.max_iterations; j++)
             {
-                path.push_back(z);
+                if (
+                    limit.min_x <= z.real() && z.real() < limit.max_x &&
+                    limit.min_y <= z.imag() && z.imag() < limit.max_y
+                )
+                    path.push_back(z);
                 z = z * z + c;
                 if (std::norm(z) > norm_limit)
                 {
-                    if (plot_path(args, path, transform, histogram, perf))
+                    perf.points_input += j + 1;
+                    if (path.size())
+                    {
+                        perf.points_output += path.size();
+                        plot_path(args, path, transform, histogram);
                         has_points = true;
+                    }
                     perf.samples_output++;
                     break;
                 }
