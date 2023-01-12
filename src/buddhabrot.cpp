@@ -97,7 +97,7 @@ Mat<3, 3> image_to_area(int64_t width, int64_t height, const BoundingBox& area, 
     ;
 }
 
-void plot_path(
+inline void plot_path(
     const Arguments& args,
     const std::vector<std::complex<float>>& path,
     const Mat<3, 3>& transform,
