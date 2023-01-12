@@ -96,15 +96,15 @@ Mat<3, 3> image_to_area(int64_t width, int64_t height, const BoundingBox& area, 
 }
 
 inline void plot_path(
-    const Arguments& args,
     const std::vector<std::complex<float>>& path,
     const Mat<3, 3>& transform,
+    int64_t width,
     std::vector<uint32_t>& histogram
 ) {
     for (const auto& point : path)
     {
         ColVec<3> p = transform * ColVec<3>{point.real(), point.imag(), 1.f};
-        histogram[(int64_t)(p.x()) + (int64_t)(p.y()) * args.width] += 1;
+        histogram[(int64_t)(p.x()) + (int64_t)(p.y()) * width] += 1;
     }
 }
 
@@ -267,20 +267,52 @@ BoundingBox area_limit(Mat<3, 3> image_transform, int64_t width, int64_t height)
     return limit;
 }
 
-void buddhabrot(
-    const Arguments& args,
-    const std::vector<bool>& mask,
-    std::vector<uint32_t>& histogram,
-    std::optional<std::vector<uint32_t>>& point_density,
-    Performance& perf
-) {
+struct BuddhabrotTask {
+    int64_t width;
+    int64_t height;
+    int64_t max_iterations;
+    int64_t samples;
+    BoundingBox sample_area;
+    int64_t mask_size;
+    int64_t mask_min_samples;
+    BoundingBox output_area;
+
+    const std::vector<bool>& mask;
+};
+
+struct BuddhabrotOutput {
+    std::vector<uint32_t>& histogram;
+    std::optional<std::vector<uint32_t>>& point_density;
+};
+
+struct BuddhabrotPerformance {
+    int64_t samples_input = 0;
+    int64_t samples_mask = 0;
+    int64_t samples_iterate = 0;
+    int64_t samples_output = 0;
+    int64_t points_input = 0;
+    int64_t points_output = 0;
+
+    void add_to_perf(Performance& perf)
+    {
+        perf.samples_input += samples_input;
+        perf.samples_mask += samples_mask;
+        perf.samples_iterate += samples_iterate;
+        perf.samples_output += samples_output;
+        perf.points_input += points_input;
+        perf.points_output += points_output;
+    }
+};
+
+void buddhabrot(const BuddhabrotTask& task, BuddhabrotOutput& output, BuddhabrotPerformance& perf)
+{
     std::vector<std::complex<float>> path;
 
-    Mat<3, 3> transform = area_to_image(*args.output_area, args.width, args.height);
-    Mat<3, 3> mask_transform = image_to_area(args.mask_size, args.mask_size, *args.sample_area);
+    Mat<3, 3> transform = area_to_image(task.output_area, task.width, task.height);
+    Mat<3, 3> mask_transform = image_to_area(task.mask_size, task.mask_size, task.sample_area);
     //std::cout << "transform: " << transform << std::endl;
 
-    const BoundingBox limit = area_limit(transform, args.width, args.height);
+    const BoundingBox limit = area_limit(transform, task.width, task.height);
 
     // Using Roberts' sequence to select sample points.
     // See http://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/
@@ -288,16 +320,16 @@ void buddhabrot(
     const float a1 = 1.f / g;
     const float a2 = 1.f / (g * g);
 
-    int64_t samples_per_mask_box = std::ceil((float)*args.samples / mask.size());
+    int64_t samples_per_mask_box = std::ceil((float)task.samples / task.mask.size());
     std::cout << "samples per mask box: " << samples_per_mask_box << std::endl;
-    float norm_limit = maximum_norm_distance(*args.output_area);
-    for (decltype(mask.size()) i = 0; i < mask.size(); i++)
+    float norm_limit = maximum_norm_distance(task.output_area);
+    for (decltype(task.mask.size()) i = 0; i < task.mask.size(); i++)
     {
-        if (mask[i])
+        if (task.mask[i])
             continue;
 
-        float x = i % args.mask_size;
-        float y = i / args.mask_size;
+        float x = i % task.mask_size;
+        float y = i / task.mask_size;
         float xoff = 0.5f;
         float yoff = 0.5f;
 
@@ -305,7 +337,7 @@ void buddhabrot(
         bool has_points = false;
         for (int64_t j = 0; j < samples_per_mask_box; j++)
         {
-            if (!has_points && *args.mask_min_samples && j > *args.mask_min_samples)
+            if (!has_points && task.mask_min_samples && j > task.mask_min_samples)
                 break;
 
             perf.samples_mask++;
@@ -320,7 +352,7 @@ void buddhabrot(
             perf.samples_iterate++;
             path.clear();
             std::complex z = c;
-            for (int64_t j = 0; j < args.max_iterations; j++)
+            for (int64_t j = 0; j < task.max_iterations; j++)
             {
                 if (
                     limit.min_x <= z.real() && z.real() < limit.max_x &&
@@ -334,7 +366,7 @@ void buddhabrot(
                     if (path.size())
                     {
                         perf.points_output += path.size();
-                        plot_path(args, path, transform, histogram);
+                        plot_path(path, transform, task.width, output.histogram);
                         has_points = true;
                     }
                     perf.samples_output++;
@@ -342,11 +374,11 @@ void buddhabrot(
                 }
             }
         }
-        if (point_density)
-            (*point_density)[i] = perf.points_output - start_points;
+        if (output.point_density)
+            (*output.point_density)[i] = perf.points_output - start_points;
     }
 
-    perf.samples_input += mask.size() * samples_per_mask_box;
+    perf.samples_input += task.mask.size() * samples_per_mask_box;
 }
 
 float area(const BoundingBox& box) {
@@ -464,8 +496,25 @@ int main(int argc, char* argv[])
             point_density = std::vector<uint32_t>(args.mask_size * args.mask_size);
 
         Clock::time_point buddhabrot_start = Clock::now();
-        buddhabrot(args, mask, histogram, point_density, perf);
+        BuddhabrotTask task = {
+            args.width,
+            args.height,
+            args.max_iterations,
+            *args.samples,
+            *args.sample_area,
+            args.mask_size,
+            *args.mask_min_samples,
+            *args.output_area,
+            mask,
+        };
+        BuddhabrotOutput output = {
+            histogram,
+            point_density,
+        };
+        BuddhabrotPerformance buddhabrot_perf;
+        buddhabrot(task, output, buddhabrot_perf);
         perf.buddhabrot_time = Clock::now() - buddhabrot_start;
+        buddhabrot_perf.add_to_perf(perf);
 
         if (args.point_density_output_path.size())
             write_image(args.mask_size, args.mask_size, *point_density, args.point_density_output_path);
