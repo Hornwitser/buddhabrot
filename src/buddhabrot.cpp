@@ -42,12 +42,11 @@ struct Arguments {
     std::string mask_output_path = "";
     std::string point_density_output_path = "";
 
-    bool escape_boundnary = false;
     std::optional<BoundingBox> output_area = std::nullopt;
     std::string output_path = "render.png";
 };
 
-const std::array<OptionDescription<Arguments>, 17> option_descriptions = {
+const std::array<OptionDescription<Arguments>, 16> option_descriptions = {
     "w", "width",             "width of the output image", &Arguments::width,
     "h", "height",            "height of the output image", &Arguments::height,
     "c", "centre",            "coordinate of the centre of output image", &Arguments::centre,
@@ -61,7 +60,6 @@ const std::array<OptionDescription<Arguments>, 17> option_descriptions = {
     "I", "mask-min-samples",  "minimum number of samples to check before bailing", &Arguments::mask_min_samples,
     "M", "mask-output-path",  "path to output mask for debugging", &Arguments::mask_output_path,
     "P", "point-output-path", "path to output point density map for debugging", &Arguments::point_density_output_path,
-    "E", "escape",            "compute escape boundnary where magnitute only increases", &Arguments::escape_boundnary,
     "A", "output-area",       "area to show in output image (overrides -c, -z)", &Arguments::output_area,
     "o", "output-path",       "path to output rendered PNG image", &Arguments::output_path,
     "?", "help",              "show this help", std::nullopt,
@@ -108,38 +106,6 @@ inline void plot_path(
         ColVec<3> p = transform * ColVec<3>{point.real(), point.imag(), 1.f};
         histogram[(int64_t)(p.x()) + (int64_t)(p.y()) * args.width] += 1;
     }
-}
-
-void escape_boundnary(const Arguments& args, std::vector<uint32_t>& histogram, Performance& perf)
-{
-    Mat<3, 3> transform = image_to_area(args.width, args.height, *args.output_area, true);
-    //std::cout << "transform: " << transform << std::endl;
-
-    for (decltype(histogram.size()) i = 0; i < histogram.size(); i++)
-    {
-        ColVec<3> p = transform * ColVec<3>{(float)(i % args.width), (float)(i / args.width), 1};
-
-        std::complex c(p.x(), p.y());
-        std::complex z = c;
-        float norm_c = std::norm(c);
-        for (int64_t j = 0; j < args.max_iterations; j++)
-        {
-            z = z * z + c;
-            float norm_z = std::norm(z);
-            if (!std::isfinite(norm_z))
-                break;
-            if (norm_z < norm_c)
-            {
-                histogram[i] = args.max_iterations - j;
-                break;
-            }
-        }
-
-        if (!std::isfinite(std::norm(z)) || std::norm(z) >= norm_c)
-            histogram[i] = 0;
-    }
-
-    perf.samples_input += histogram.size();
 }
 
 /**
@@ -472,16 +438,12 @@ int main(int argc, char* argv[])
     std::cout << "mask_edge_points: " << args.mask_edge_points << "\n";
     std::cout << "mask_min_samples: " << args.mask_min_samples << "\n";
     std::cout << "max_iterations: " << args.max_iterations << "\n";
-    std::cout << "escape_boundnary: " << args.escape_boundnary << "\n";
     std::cout << "output_area: " << args.output_area << "\n";
     std::cout << "output_path: " << args.output_path << "\n";
 
     std::vector<uint32_t> histogram(args.width * args.height);
     Performance perf;
     Clock::time_point start = Clock::now();
-    if (args.escape_boundnary)
-        escape_boundnary(args, histogram, perf);
-    else
     {
         if (args.mask_size < 1)
             args.mask_size = 1;
