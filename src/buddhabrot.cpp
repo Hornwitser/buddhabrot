@@ -2,6 +2,7 @@
 #include <array>
 #include <chrono>
 #include <complex>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -39,6 +40,7 @@ struct Arguments {
     int64_t mask_size = 1000;
     int32_t mask_edge_points = 4;
     std::optional<int64_t> mask_min_samples = std::nullopt;
+    int32_t mask_slices = 4;
     std::string mask_output_path = "";
     std::string point_density_output_path = "";
 
@@ -46,7 +48,7 @@ struct Arguments {
     std::string output_path = "render.png";
 };
 
-const std::array<OptionDescription<Arguments>, 16> option_descriptions = {
+const std::array<OptionDescription<Arguments>, 17> option_descriptions = {
     "w", "width",             "width of the output image", &Arguments::width,
     "h", "height",            "height of the output image", &Arguments::height,
     "c", "centre",            "coordinate of the centre of output image", &Arguments::centre,
@@ -58,6 +60,7 @@ const std::array<OptionDescription<Arguments>, 16> option_descriptions = {
     "m", "mask-size",         "size of mandelbrot mask to use (0 for off)", &Arguments::mask_size,
     "e", "mask-edge-points",  "number of points to check along edges of the mask", &Arguments::mask_edge_points,
     "I", "mask-min-samples",  "minimum number of samples to check before bailing", &Arguments::mask_min_samples,
+    "L", "mask-slices",       "slices to compute (improves progress reporting)", &Arguments::mask_slices,
     "M", "mask-output-path",  "path to output mask for debugging", &Arguments::mask_output_path,
     "P", "point-output-path", "path to output point density map for debugging", &Arguments::point_density_output_path,
     "A", "output-area",       "area to show in output image (overrides -c, -z)", &Arguments::output_area,
@@ -276,6 +279,10 @@ struct BuddhabrotTask {
     int64_t samples_per_mask_box;
 
     const std::vector<bool>& mask;
+    using Size = std::vector<bool>::size_type;
+    Size mask_start;
+    Size mask_end;
+    Size mask_stride;
 
     Mat<3, 3> transform;
     Mat<3, 3> mask_transform;
@@ -298,12 +305,28 @@ struct BuddhabrotTask {
             *args.mask_min_samples,
             samples_per_mask_box,
             mask,
+            0,
+            mask.size(),
+            1,
             transform,
             mask_transform,
             maximum_norm_distance(*args.output_area),
             area_limit(transform, args.width, args.height),
         };
     }
+
+    BuddhabrotTask chip_off(int64_t operations)
+    {
+        Size mask_boxes = std::ceil((float)operations / (max_iterations * samples_per_mask_box)) * mask_stride;
+        mask_boxes = std::min(mask_boxes, mask_end - mask_start);
+        BuddhabrotTask chip = *this;
+        chip.mask_end = chip.mask_start + mask_boxes;
+        mask_start += mask_boxes;
+        return chip;
+    }
+
+    bool complete() const { return mask_start == mask_end; }
+    Size mask_count() const { return (mask_end - mask_start + mask_stride - 1) / mask_stride; }
 };
 
 struct BuddhabrotOutput {
@@ -339,7 +362,7 @@ constexpr float roberts_a2 = 1.f / (roberts_g * roberts_g);
 void buddhabrot(const BuddhabrotTask& task, BuddhabrotOutput& output, BuddhabrotPerformance& perf)
 {
     std::vector<std::complex<float>> path;
-    for (decltype(task.mask.size()) i = 0; i < task.mask.size(); i++)
+    for (auto i = task.mask_start; i < task.mask_end; i += task.mask_stride)
     {
         if (task.mask[i])
             continue;
@@ -394,8 +417,73 @@ void buddhabrot(const BuddhabrotTask& task, BuddhabrotOutput& output, Buddhabrot
             (*output.point_density)[i] = perf.points_output - start_points;
     }
 
-    perf.samples_input += task.mask.size() * task.samples_per_mask_box;
+    perf.samples_input += task.mask_count() * task.samples_per_mask_box;
 }
+
+struct Binder {
+    std::vector<BuddhabrotTask> tasks;
+    Clock::time_point start = Clock::now();
+
+    int64_t ops_estimate = 10'000'000'000;
+    int64_t ops_progress = 0;
+    int64_t ops_total = 0;
+
+    bool complete() { return ops_progress == ops_total; }
+
+    BuddhabrotTask chip_task()
+    {
+        if (tasks.empty())
+        {
+            std::cerr << "Error: chip_task() tasks list is empty" << std::endl;
+            std::abort();
+        }
+        BuddhabrotTask chip = tasks.back().chip_off(ops_estimate);
+        if (tasks.back().complete())
+            tasks.pop_back();
+        return chip;
+    }
+
+    void complete_task(const BuddhabrotTask& task)
+    {
+        ops_progress += task.max_iterations * task.samples_per_mask_box * task.mask_count();
+
+        Seconds total_time = Seconds(Clock::now() - start);
+        int64_t ops_s = ops_progress / total_time.count();
+
+        auto precision = std::cout.precision();
+        std::cout.precision(2);
+        std::cout << std::fixed;
+        std::cout
+            << "\r\033[K" // Replace current line
+            << std::setw(6) << (float)ops_progress / ops_total * 100.f
+            << "% (" << total_time << ") " << ops_s / 1e9f << " Gbops/s";
+        std::cout.flush();
+        std::cout << std::defaultfloat;
+        std::cout.precision(precision);
+
+        if (ops_s > ops_estimate * 3 / 2)
+            ops_estimate = ops_estimate * 3 / 2;
+        if (ops_s < ops_estimate * 2 / 3)
+            ops_estimate = ops_estimate / 2;
+        if (ops_estimate == 1)
+            std::abort();
+    }
+
+    static Binder create_from_task(const BuddhabrotTask& task, int slice_count)
+    {
+        Binder binder;
+        for (int i = 0; i < slice_count; i++)
+        {
+            BuddhabrotTask slice = task;
+            slice.mask_stride = slice_count;
+            slice.mask_start = i;
+            binder.tasks.push_back(slice);
+        }
+
+        binder.ops_total = task.max_iterations * task.samples_per_mask_box * (task.mask_end - task.mask_start);
+        return binder;
+    }
+};
 
 float area(const BoundingBox& box) {
     return (box.max_x - box.min_x) * (box.max_y - box.min_y);
@@ -518,7 +606,13 @@ int main(int argc, char* argv[])
             point_density,
         };
         BuddhabrotPerformance buddhabrot_perf;
-        buddhabrot(task, output, buddhabrot_perf);
+        Binder binder = Binder::create_from_task(task, args.mask_slices);
+        while (!binder.complete())
+        {
+            auto chip = binder.chip_task();
+            buddhabrot(chip, output, buddhabrot_perf);
+            binder.complete_task(chip);
+        }
         perf.buddhabrot_time = Clock::now() - buddhabrot_start;
         buddhabrot_perf.add_to_perf(perf);
 
@@ -527,6 +621,7 @@ int main(int argc, char* argv[])
     }
     perf.compute_time = Clock::now() - start;
 
+    std::cout << "\n"; // progress report does not place a newline at the end.
     std::cout << "samples_input: " << perf.samples_input << "\n";
     std::cout << "points_output: " << perf.points_output << "\n";
     std::cout << "samples_mask/input ratio: " << (float)perf.samples_mask / perf.samples_input << "\n";
