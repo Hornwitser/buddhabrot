@@ -271,13 +271,39 @@ struct BuddhabrotTask {
     int64_t width;
     int64_t height;
     int64_t max_iterations;
-    int64_t samples;
-    BoundingBox sample_area;
     int64_t mask_size;
     int64_t mask_min_samples;
-    BoundingBox output_area;
+    int64_t samples_per_mask_box;
 
     const std::vector<bool>& mask;
+
+    Mat<3, 3> transform;
+    Mat<3, 3> mask_transform;
+    float norm_limit;
+    const BoundingBox limit;
+
+    static BuddhabrotTask create_from_args(const Arguments& args, std::vector<bool>& mask)
+    {
+        Mat<3, 3> transform = area_to_image(*args.output_area, args.width, args.height);
+        Mat<3, 3> mask_transform = image_to_area(args.mask_size, args.mask_size, *args.sample_area);
+
+        int64_t samples_per_mask_box = std::ceil((float)*args.samples / mask.size());
+        std::cout << "samples per mask box: " << samples_per_mask_box << std::endl;
+
+        return {
+            args.width,
+            args.height,
+            args.max_iterations,
+            args.mask_size,
+            *args.mask_min_samples,
+            samples_per_mask_box,
+            mask,
+            transform,
+            mask_transform,
+            maximum_norm_distance(*args.output_area),
+            area_limit(transform, args.width, args.height),
+        };
+    }
 };
 
 struct BuddhabrotOutput {
@@ -304,25 +330,15 @@ struct BuddhabrotPerformance {
     }
 };
 
+// Roberts' quasirandom sequence for points on a 2D plane
+// See http://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/
+constexpr float roberts_g = 1.32471795724474602596f;
+constexpr float roberts_a1 = 1.f / roberts_g;
+constexpr float roberts_a2 = 1.f / (roberts_g * roberts_g);
+
 void buddhabrot(const BuddhabrotTask& task, BuddhabrotOutput& output, BuddhabrotPerformance& perf)
 {
     std::vector<std::complex<float>> path;
-
-    Mat<3, 3> transform = area_to_image(task.output_area, task.width, task.height);
-    Mat<3, 3> mask_transform = image_to_area(task.mask_size, task.mask_size, task.sample_area);
-    //std::cout << "transform: " << transform << std::endl;
-
-    const BoundingBox limit = area_limit(transform, task.width, task.height);
-
-    // Using Roberts' sequence to select sample points.
-    // See http://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/
-    const float g = 1.32471795724474602596f;
-    const float a1 = 1.f / g;
-    const float a2 = 1.f / (g * g);
-
-    int64_t samples_per_mask_box = std::ceil((float)task.samples / task.mask.size());
-    std::cout << "samples per mask box: " << samples_per_mask_box << std::endl;
-    float norm_limit = maximum_norm_distance(task.output_area);
     for (decltype(task.mask.size()) i = 0; i < task.mask.size(); i++)
     {
         if (task.mask[i])
@@ -335,15 +351,15 @@ void buddhabrot(const BuddhabrotTask& task, BuddhabrotOutput& output, Buddhabrot
 
         int64_t start_points = perf.points_output;
         bool has_points = false;
-        for (int64_t j = 0; j < samples_per_mask_box; j++)
+        for (int64_t j = 0; j < task.samples_per_mask_box; j++)
         {
             if (!has_points && task.mask_min_samples && j > task.mask_min_samples)
                 break;
 
             perf.samples_mask++;
-            ColVec<3> p = mask_transform * ColVec<3>{x + xoff, y + yoff, 1.f};
-            xoff = std::fmod(xoff + a1, 1.f);
-            yoff = std::fmod(yoff + a2, 1.f);
+            ColVec<3> p = task.mask_transform * ColVec<3>{x + xoff, y + yoff, 1.f};
+            xoff = std::fmod(xoff + roberts_a1, 1.f);
+            yoff = std::fmod(yoff + roberts_a2, 1.f);
             const std::complex<float> c(p.x(), p.y());
 
             if (inside_cardioid(c) || inside_period2_bulb(c))
@@ -355,18 +371,18 @@ void buddhabrot(const BuddhabrotTask& task, BuddhabrotOutput& output, Buddhabrot
             for (int64_t j = 0; j < task.max_iterations; j++)
             {
                 if (
-                    limit.min_x <= z.real() && z.real() < limit.max_x &&
-                    limit.min_y <= z.imag() && z.imag() < limit.max_y
+                    task.limit.min_x <= z.real() && z.real() < task.limit.max_x &&
+                    task.limit.min_y <= z.imag() && z.imag() < task.limit.max_y
                 )
                     path.push_back(z);
                 z = z * z + c;
-                if (std::norm(z) > norm_limit)
+                if (std::norm(z) > task.norm_limit)
                 {
                     perf.points_input += j + 1;
                     if (path.size())
                     {
                         perf.points_output += path.size();
-                        plot_path(path, transform, task.width, output.histogram);
+                        plot_path(path, task.transform, task.width, output.histogram);
                         has_points = true;
                     }
                     perf.samples_output++;
@@ -378,7 +394,7 @@ void buddhabrot(const BuddhabrotTask& task, BuddhabrotOutput& output, Buddhabrot
             (*output.point_density)[i] = perf.points_output - start_points;
     }
 
-    perf.samples_input += task.mask.size() * samples_per_mask_box;
+    perf.samples_input += task.mask.size() * task.samples_per_mask_box;
 }
 
 float area(const BoundingBox& box) {
@@ -496,17 +512,7 @@ int main(int argc, char* argv[])
             point_density = std::vector<uint32_t>(args.mask_size * args.mask_size);
 
         Clock::time_point buddhabrot_start = Clock::now();
-        BuddhabrotTask task = {
-            args.width,
-            args.height,
-            args.max_iterations,
-            *args.samples,
-            *args.sample_area,
-            args.mask_size,
-            *args.mask_min_samples,
-            *args.output_area,
-            mask,
-        };
+        BuddhabrotTask task = BuddhabrotTask::create_from_args(args, mask);
         BuddhabrotOutput output = {
             histogram,
             point_density,
