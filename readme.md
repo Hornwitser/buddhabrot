@@ -1,5 +1,7 @@
 # Buddhabrot renderer in C++
 
+![A zoomed render at -1.2 + 0.706i](example.png)
+
 A basic command line based multithreaded Buddhabrot fractal renderer that was written in C++ in 2 weeks.
 Its main features are being resonably fast, able to plot about 200 million points per second on a quad core Intel Haswell CPU, and correctly handle zooming into the set without loosing points that should have ended up in the zoomed area.
 The rendered result is automatically scaled and output as a 16-bit PNG with sRGB encoding gamma applied.
