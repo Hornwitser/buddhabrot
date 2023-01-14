@@ -2,11 +2,14 @@
 #include <array>
 #include <chrono>
 #include <complex>
+#include <future>
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include <cmath>
@@ -37,6 +40,8 @@ struct Arguments {
     float samples_per_pixel = 1.f;
     std::optional<int64_t> samples = std::nullopt;
     std::optional<BoundingBox> sample_area = std::nullopt;
+    int32_t threads = std::thread::hardware_concurrency();
+    int32_t tasks_per_second = 2;
     int64_t mask_size = 1000;
     int32_t mask_edge_points = 4;
     std::optional<int64_t> mask_min_samples = std::nullopt;
@@ -48,7 +53,7 @@ struct Arguments {
     std::string output_path = "render.png";
 };
 
-const std::array<OptionDescription<Arguments>, 17> option_descriptions = {
+const std::array<OptionDescription<Arguments>, 19> option_descriptions = {
     "w", "width",             "width of the output image", &Arguments::width,
     "h", "height",            "height of the output image", &Arguments::height,
     "c", "centre",            "coordinate of the centre of output image", &Arguments::centre,
@@ -57,6 +62,8 @@ const std::array<OptionDescription<Arguments>, 17> option_descriptions = {
     "s", "samples",           "number of samples to compute (overrides -S)", &Arguments::samples,
     "a", "sample-area",       "area to make random samples in", &Arguments::sample_area,
     "i", "max-iterations",    "maximum number of iterations befor discarding path", &Arguments::max_iterations,
+    "t", "threads",           "threads to use", &Arguments::threads,
+    "T", "task-per-second",   "target rate to schedule tasks at", &Arguments::tasks_per_second,
     "m", "mask-size",         "size of mandelbrot mask to use (0 for off)", &Arguments::mask_size,
     "e", "mask-edge-points",  "number of points to check along edges of the mask", &Arguments::mask_edge_points,
     "I", "mask-min-samples",  "minimum number of samples to check before bailing", &Arguments::mask_min_samples,
@@ -330,8 +337,22 @@ struct BuddhabrotTask {
 };
 
 struct BuddhabrotOutput {
-    std::vector<uint32_t>& histogram;
-    std::optional<std::vector<uint32_t>>& point_density;
+    std::vector<uint32_t> histogram;
+    std::optional<std::vector<uint32_t>> point_density;
+
+    void add(BuddhabrotOutput& term)
+    {
+        for (auto out = histogram.begin(), in = term.histogram.begin(); out != histogram.end(); out++, in++)
+            *out = *out + *in;
+
+        if (point_density && term.point_density)
+            for (
+                auto out = point_density->begin(), in = term.point_density->begin();
+                out != point_density->end();
+                out++, in++
+            )
+                *out = *out + *in;
+    }
 };
 
 struct BuddhabrotPerformance {
@@ -341,6 +362,16 @@ struct BuddhabrotPerformance {
     int64_t samples_output = 0;
     int64_t points_input = 0;
     int64_t points_output = 0;
+
+    void add(const BuddhabrotPerformance& perf)
+    {
+        samples_input += perf.samples_input;
+        samples_mask += perf.samples_mask;
+        samples_iterate += perf.samples_iterate;
+        samples_output += perf.samples_output;
+        points_input += perf.points_input;
+        points_output += perf.points_output;
+    }
 
     void add_to_perf(Performance& perf)
     {
@@ -427,17 +458,14 @@ struct Binder {
     int64_t ops_estimate = 10'000'000'000;
     int64_t ops_progress = 0;
     int64_t ops_total = 0;
+    int computing_threads = 0;
+    int tasks_per_second = 1;
 
-    bool complete() { return ops_progress == ops_total; }
-
-    BuddhabrotTask chip_task()
+    std::optional<BuddhabrotTask> chip_task()
     {
         if (tasks.empty())
-        {
-            std::cerr << "Error: chip_task() tasks list is empty" << std::endl;
-            std::abort();
-        }
-        BuddhabrotTask chip = tasks.back().chip_off(ops_estimate);
+            return std::nullopt;
+        BuddhabrotTask chip = tasks.back().chip_off(ops_estimate / tasks_per_second);
         if (tasks.back().complete())
             tasks.pop_back();
         return chip;
@@ -456,7 +484,7 @@ struct Binder {
         std::cout
             << "\r\033[K" // Replace current line
             << std::setw(6) << (float)ops_progress / ops_total * 100.f
-            << "% (" << total_time << ") " << ops_s / 1e9f << " Gbops/s";
+            << "% " << computing_threads << " thread(s) " << total_time << " " << ops_s / 1e9f << " Gbops/s";
         std::cout.flush();
         std::cout << std::defaultfloat;
         std::cout.precision(precision);
@@ -469,7 +497,7 @@ struct Binder {
             std::abort();
     }
 
-    static Binder create_from_task(const BuddhabrotTask& task, int slice_count)
+    static Binder create_from_task(const BuddhabrotTask& task, int slice_count, int tasks_per_second)
     {
         Binder binder;
         for (int i = 0; i < slice_count; i++)
@@ -481,7 +509,46 @@ struct Binder {
         }
 
         binder.ops_total = task.max_iterations * task.samples_per_mask_box * (task.mask_end - task.mask_start);
+        binder.tasks_per_second = tasks_per_second;
         return binder;
+    }
+
+    void render(BuddhabrotOutput& output, int thread_count, BuddhabrotPerformance& perf)
+    {
+        std::mutex access_mutex;
+        std::vector<std::future<std::pair<BuddhabrotOutput, BuddhabrotPerformance>>> threads;
+        computing_threads = thread_count;
+        for (int i = 0; i < thread_count; i++)
+            threads.emplace_back(std::async([this, &access_mutex, &output, i]() {
+                BuddhabrotOutput thread_output = output;
+                BuddhabrotPerformance thread_perf;
+
+                while (true)
+                {
+                    std::unique_lock<std::mutex> chip_lock(access_mutex);
+                    auto chip = chip_task();
+                    if (!chip)
+                    {
+                        computing_threads--;
+                        break;
+                    }
+                    chip_lock.unlock();
+                    buddhabrot(*chip, thread_output, thread_perf);
+                    {
+                        std::lock_guard<std::mutex> lock(access_mutex);
+                        complete_task(*chip);
+                    }
+                }
+
+                return std::make_pair(std::move(thread_output), std::move(thread_perf));
+            }));
+
+        for (auto& thread_future : threads)
+        {
+            auto result = thread_future.get();
+            output.add(result.first);
+            perf.add(result.second);
+        }
     }
 };
 
@@ -574,10 +641,11 @@ int main(int argc, char* argv[])
     std::cout << "mask_edge_points: " << args.mask_edge_points << "\n";
     std::cout << "mask_min_samples: " << args.mask_min_samples << "\n";
     std::cout << "max_iterations: " << args.max_iterations << "\n";
+    std::cout << "threads: " << args.threads << "\n";
     std::cout << "output_area: " << args.output_area << "\n";
     std::cout << "output_path: " << args.output_path << "\n";
 
-    std::vector<uint32_t> histogram(args.width * args.height);
+    BuddhabrotOutput output = { std::vector<uint32_t>(args.width * args.height), std::nullopt };
     Performance perf;
     Clock::time_point start = Clock::now();
     {
@@ -595,29 +663,19 @@ int main(int argc, char* argv[])
                 write_image(args.mask_size, args.mask_size, mask, args.mask_output_path);
         }
 
-        std::optional<std::vector<uint32_t>> point_density;
         if (args.point_density_output_path.size())
-            point_density = std::vector<uint32_t>(args.mask_size * args.mask_size);
+            output.point_density = std::vector<uint32_t>(args.mask_size * args.mask_size);
 
         Clock::time_point buddhabrot_start = Clock::now();
         BuddhabrotTask task = BuddhabrotTask::create_from_args(args, mask);
-        BuddhabrotOutput output = {
-            histogram,
-            point_density,
-        };
         BuddhabrotPerformance buddhabrot_perf;
-        Binder binder = Binder::create_from_task(task, args.mask_slices);
-        while (!binder.complete())
-        {
-            auto chip = binder.chip_task();
-            buddhabrot(chip, output, buddhabrot_perf);
-            binder.complete_task(chip);
-        }
+        Binder binder = Binder::create_from_task(task, args.mask_slices, args.tasks_per_second);
+        binder.render(output, args.threads, buddhabrot_perf);
         perf.buddhabrot_time = Clock::now() - buddhabrot_start;
         buddhabrot_perf.add_to_perf(perf);
 
         if (args.point_density_output_path.size())
-            write_image(args.mask_size, args.mask_size, *point_density, args.point_density_output_path);
+            write_image(args.mask_size, args.mask_size, *output.point_density, args.point_density_output_path);
     }
     perf.compute_time = Clock::now() - start;
 
@@ -634,7 +692,7 @@ int main(int argc, char* argv[])
     std::cout << "compute_time: " << Seconds(perf.compute_time) << "\n";
     std::cout << "buddhabrot/compute ratio: " << Seconds(perf.buddhabrot_time) / Seconds(perf.compute_time) << "\n";
 
-    if (!write_image(args.width, args.height, histogram, args.output_path))
+    if (!write_image(args.width, args.height, output.histogram, args.output_path))
         return EXIT_FAILURE;
 
     return EXIT_SUCCESS;
