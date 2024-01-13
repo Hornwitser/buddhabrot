@@ -617,7 +617,7 @@ int main(int argc, char* argv[])
         args.sample_area = maximum_sample_area(args);
 
     if (!args.samples)
-        args.samples = std::round(
+        args.samples = (int64_t)std::round(
             args.samples_per_pixel * args.height * args.width *
             area(*args.sample_area) / area(*args.output_area)
         );
@@ -628,7 +628,7 @@ int main(int argc, char* argv[])
         ;
 
     if (!args.mask_min_samples)
-        args.mask_min_samples = std::sqrt(*args.samples / std::max(args.mask_size * args.mask_size, (int64_t)1));
+        args.mask_min_samples = (int64_t)std::sqrt(*args.samples / std::max(args.mask_size * args.mask_size, (int64_t)1));
 
     std::cout << "width: " << args.width << "\n";
     std::cout << "height: " << args.height << "\n";
