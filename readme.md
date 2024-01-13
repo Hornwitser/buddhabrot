@@ -8,7 +8,7 @@ The rendered result is automatically scaled and output as a 16-bit PNG with sRGB
 
 ## Compiling
 
-Currently only a modern Linux like environment is supported, you will need GCC 12 or newer to compile.
+This project requires a modern C++ toolchain, you will need GCC 12 or newer, or Visual Studio 2019 or later to compile.
 To build run `make` to compile and produce the `bin/buddhabrot` executable.
 
 ## Example Usage
