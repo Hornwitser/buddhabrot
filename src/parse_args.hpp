@@ -87,13 +87,13 @@ const OptionDescription<T>& find_long_opt(std::string_view option, const Opts& o
 template <typename T>
 void parse_number(std::string_view value, T& field)
 {
-    std::from_chars_result result = std::from_chars(value.begin(), value.end(), field);
+    std::from_chars_result result = std::from_chars(&*value.begin(), &*value.end(), field);
     if (result.ec == std::errc::result_out_of_range)
     {
         std::cerr << "Failed to parse number, input " << value << " out of range" << std::endl;
         throw ParsingFailed{};
     }
-    if (result.ptr != value.end())
+    if (result.ptr != &*value.end())
     {
         std::cerr << "Failed to parse number, input " << value << " is not valid" << std::endl;
         throw ParsingFailed{};
